@@ -1,0 +1,716 @@
+<!doctype html>
+<html lang="id" class="h-full">
+ <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistem Pembelajaran Interaktif SMP</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/_sdk/element_sdk.js"></script>
+  <script src="/_sdk/data_sdk.js"></script>
+  <style>
+        body {
+            box-sizing: border-box;
+        }
+        .loading-spinner {
+            border: 3px solid #f3f4f6;
+            border-top: 3px solid #3b82f6;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .card-hover {
+            transition: all 0.3s ease;
+        }
+        .card-hover:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+        .progress-bar {
+            transition: width 0.5s ease;
+        }
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            padding: 12px 20px;
+            border-radius: 8px;
+            color: white;
+            font-weight: 500;
+            transform: translateX(400px);
+            transition: transform 0.3s ease;
+        }
+        .notification.show {
+            transform: translateX(0);
+        }
+        .notification.success {
+            background-color: #10b981;
+        }
+        .notification.error {
+            background-color: #ef4444;
+        }
+        .modal-overlay {
+            background-color: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(4px);
+        }
+    </style>
+ </head>
+ <body class="h-full bg-gray-50">
+  <script>
+        // Configuration
+        const defaultConfig = {
+            school_name: "SMP Negeri 1 Indonesia",
+            school_vision: "Mewujudkan Generasi Cerdas, Berkarakter, dan Berdaya Saing Global",
+            welcome_message: "Selamat datang di portal pembelajaran digital yang inovatif",
+            footer_message: "Merdeka Belajar - Indonesia Maju 2045",
+            primary_color: "#3b82f6",
+            secondary_color: "#10b981",
+            accent_color: "#f59e0b",
+            text_color: "#1f2937",
+            background_color: "#f9fafb"
+        };
+
+        // Google Sheets Configuration
+        const SHEET_CONFIG = {
+            SHEET_ID: '12damNTphrDElg1qsmAWVKoTrfXhDXKa8l660vhTNR8I', // Ganti dengan ID Google Sheets Anda
+            STUDENTS_SHEET: 'DataSiswa',
+            TEACHERS_SHEET: 'DataGuru', 
+            MATERIALS_SHEET: 'MateriPelajaran',
+            LKPD_SHEET: 'LKPD',
+            PROGRESS_SHEET: 'ProgressSiswa'
+        };
+
+        // Global State
+        let currentUser = null;
+        let studentsData = [];
+        let teachersData = [];
+        let materialsData = [];
+        let lkpdData = [];
+        let progressData = [];
+        let isLoading = false;
+        let currentRecordCount = 0;
+
+        // Data SDK Handler
+        const dataHandler = {
+            onDataChanged(data) {
+                progressData = data;
+                currentRecordCount = data.length;
+                updateProgressDisplay();
+            }
+        };
+
+        // Utility Functions
+        function showNotification(message, type = 'success') {
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.textContent = message;
+            document.body.appendChild(notification);
+            
+            setTimeout(() => notification.classList.add('show'), 100);
+            setTimeout(() => {
+                notification.classList.remove('show');
+                setTimeout(() => document.body.removeChild(notification), 300);
+            }, 3000);
+        }
+
+        function showLoading(show = true) {
+            isLoading = show;
+            const loadingElements = document.querySelectorAll('.loading-indicator');
+            loadingElements.forEach(el => {
+                el.style.display = show ? 'flex' : 'none';
+            });
+        }
+
+        async function fetchGoogleSheetData(sheetName) {
+            try {
+                const url = `https://docs.google.com/spreadsheets/d/${SHEET_CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&sheet=${sheetName}`;
+                const response = await fetch(url);
+                const text = await response.text();
+                const json = JSON.parse(text.substr(47).slice(0, -2));
+                
+                if (!json.table || !json.table.rows) return [];
+                
+                const headers = json.table.cols.map(col => col.label || '');
+                return json.table.rows.map(row => {
+                    const obj = {};
+                    headers.forEach((header, index) => {
+                        const cell = row.c[index];
+                        obj[header] = cell ? cell.v : '';
+                    });
+                    return obj;
+                });
+            } catch (error) {
+                console.error(`Error fetching ${sheetName}:`, error);
+                showNotification(`Gagal memuat data ${sheetName}`, 'error');
+                return [];
+            }
+        }
+
+        async function loadAllData() {
+            showLoading(true);
+            try {
+                const [students, teachers, materials, lkpd] = await Promise.all([
+                    fetchGoogleSheetData(SHEET_CONFIG.STUDENTS_SHEET),
+                    fetchGoogleSheetData(SHEET_CONFIG.TEACHERS_SHEET),
+                    fetchGoogleSheetData(SHEET_CONFIG.MATERIALS_SHEET),
+                    fetchGoogleSheetData(SHEET_CONFIG.LKPD_SHEET)
+                ]);
+                
+                studentsData = students;
+                teachersData = teachers;
+                materialsData = materials;
+                lkpdData = lkpd;
+                
+                showNotification('Data berhasil dimuat dari Google Sheets');
+            } catch (error) {
+                showNotification('Gagal memuat data dari Google Sheets', 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        async function saveProgress(progressData) {
+            if (currentRecordCount >= 999) {
+                showNotification('Batas maksimum 999 record tercapai. Hubungi administrator.', 'error');
+                return;
+            }
+
+            showLoading(true);
+            try {
+                const result = await window.dataSdk.create({
+                    student_id: progressData.student_id,
+                    student_name: progressData.student_name,
+                    class_grade: progressData.class_grade,
+                    subject: progressData.subject,
+                    material_id: progressData.material_id,
+                    material_title: progressData.material_title,
+                    progress_type: progressData.progress_type,
+                    progress_value: progressData.progress_value,
+                    session_duration: progressData.session_duration || 0,
+                    timestamp: new Date().toISOString()
+                });
+
+                if (result.isOk) {
+                    showNotification('Progress berhasil disimpan');
+                } else {
+                    showNotification('Gagal menyimpan progress', 'error');
+                }
+            } catch (error) {
+                showNotification('Error menyimpan progress', 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        // Authentication Functions
+        function showLoginModal() {
+            document.getElementById('login-modal').classList.remove('hidden');
+        }
+
+        function hideLoginModal() {
+            document.getElementById('login-modal').classList.add('hidden');
+        }
+
+        async function handleLogin(event) {
+            event.preventDefault();
+            const formData = new FormData(event.target);
+            const userType = formData.get('userType');
+            const identifier = formData.get('identifier');
+
+            showLoading(true);
+
+            try {
+                let user = null;
+                
+                if (userType === 'student') {
+                    user = studentsData.find(s => s.NISN === identifier);
+                    if (user) {
+                        user.type = 'student';
+                        user.id = user.NISN;
+                        user.name = user.Nama;
+                        user.class = user.Kelas;
+                    }
+                } else if (userType === 'teacher') {
+                    user = teachersData.find(t => t.NIP === identifier);
+                    if (user) {
+                        user.type = 'teacher';
+                        user.id = user.NIP;
+                        user.name = user.Nama;
+                        user.subject = user['Mata Pelajaran'];
+                    }
+                }
+
+                if (user) {
+                    currentUser = user;
+                    hideLoginModal();
+                    showDashboard();
+                    showNotification(`Selamat datang, ${user.name}!`);
+                } else {
+                    showNotification('ID tidak ditemukan. Periksa kembali data Anda.', 'error');
+                }
+            } catch (error) {
+                showNotification('Gagal melakukan login', 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        function logout() {
+            currentUser = null;
+            showLoginScreen();
+            showNotification('Anda telah logout');
+        }
+
+        // UI Functions
+        function showLoginScreen() {
+            document.getElementById('login-screen').classList.remove('hidden');
+            document.getElementById('dashboard-screen').classList.add('hidden');
+        }
+
+        function showDashboard() {
+            document.getElementById('login-screen').classList.add('hidden');
+            document.getElementById('dashboard-screen').classList.remove('hidden');
+            updateDashboard();
+        }
+
+        function updateDashboard() {
+            if (!currentUser) return;
+
+            document.getElementById('user-name').textContent = currentUser.name;
+            document.getElementById('user-info').textContent = 
+                currentUser.type === 'student' ? `Kelas ${currentUser.class}` : `Guru ${currentUser.subject}`;
+
+            if (currentUser.type === 'student') {
+                showStudentDashboard();
+            } else {
+                showTeacherDashboard();
+            }
+        }
+
+        function showStudentDashboard() {
+            const studentClass = currentUser.class.charAt(0); // Get class number (7, 8, 9)
+            const availableMaterials = materialsData.filter(m => m.Kelas === studentClass);
+            const availableLKPD = lkpdData.filter(l => l.Kelas === studentClass);
+
+            renderMaterials(availableMaterials);
+            renderLKPD(availableLKPD);
+            updateStudentProgress();
+        }
+
+        function showTeacherDashboard() {
+            const teacherSubject = currentUser.subject;
+            const subjectMaterials = materialsData.filter(m => m['Mata Pelajaran'] === teacherSubject);
+            const subjectLKPD = lkpdData.filter(l => l['Mata Pelajaran'] === teacherSubject);
+
+            renderMaterials(subjectMaterials);
+            renderLKPD(subjectLKPD);
+            renderStudentProgress();
+        }
+
+        function renderMaterials(materials) {
+            const container = document.getElementById('materials-container');
+            container.innerHTML = '';
+
+            if (materials.length === 0) {
+                container.innerHTML = '<p class="text-gray-500 text-center py-8">Belum ada materi tersedia</p>';
+                return;
+            }
+
+            materials.forEach(material => {
+                const card = document.createElement('div');
+                card.className = 'bg-white rounded-lg shadow-md p-6 card-hover fade-in';
+                card.innerHTML = `
+                    <div class="flex items-start justify-between mb-4">
+                        <div class="flex-1">
+                            <h3 class="text-lg font-semibold text-gray-800 mb-2">${material.Judul}</h3>
+                            <p class="text-sm text-gray-600 mb-2">${material.Deskripsi}</p>
+                            <div class="flex items-center space-x-4 text-sm text-gray-500">
+                                <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded">${material['Mata Pelajaran']}</span>
+                                <span class="bg-green-100 text-green-800 px-2 py-1 rounded">Kelas ${material.Kelas}</span>
+                                <span class="bg-purple-100 text-purple-800 px-2 py-1 rounded">${material.Tipe}</span>
+                            </div>
+                        </div>
+                        <div class="ml-4">
+                            ${material.Tipe === 'video' ? '🎥' : '📄'}
+                        </div>
+                    </div>
+                    <button onclick="accessMaterial('${material.ID}', '${material.Judul}', '${material.Link}', '${material['Mata Pelajaran']}')" 
+                            class="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors">
+                        Akses Materi
+                    </button>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        function renderLKPD(lkpdList) {
+            const container = document.getElementById('lkpd-container');
+            container.innerHTML = '';
+
+            if (lkpdList.length === 0) {
+                container.innerHTML = '<p class="text-gray-500 text-center py-8">Belum ada LKPD tersedia</p>';
+                return;
+            }
+
+            lkpdList.forEach(lkpd => {
+                const card = document.createElement('div');
+                card.className = 'bg-white rounded-lg shadow-md p-6 card-hover fade-in';
+                card.innerHTML = `
+                    <div class="flex items-start justify-between mb-4">
+                        <div class="flex-1">
+                            <h3 class="text-lg font-semibold text-gray-800 mb-2">${lkpd.Judul}</h3>
+                            <p class="text-sm text-gray-600 mb-2">${lkpd.Deskripsi}</p>
+                            <div class="flex items-center space-x-4 text-sm text-gray-500">
+                                <span class="bg-orange-100 text-orange-800 px-2 py-1 rounded">${lkpd['Mata Pelajaran']}</span>
+                                <span class="bg-green-100 text-green-800 px-2 py-1 rounded">Kelas ${lkpd.Kelas}</span>
+                            </div>
+                        </div>
+                        <div class="ml-4">📝</div>
+                    </div>
+                    <button onclick="accessLKPD('${lkpd.ID}', '${lkpd.Judul}', '${lkpd.Link}', '${lkpd['Mata Pelajaran']}')" 
+                            class="w-full bg-orange-600 text-white py-2 px-4 rounded-lg hover:bg-orange-700 transition-colors">
+                        Kerjakan LKPD
+                    </button>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        async function accessMaterial(materialId, title, link, subject) {
+            if (currentUser && currentUser.type === 'student') {
+                await saveProgress({
+                    student_id: currentUser.id,
+                    student_name: currentUser.name,
+                    class_grade: currentUser.class,
+                    subject: subject,
+                    material_id: materialId,
+                    material_title: title,
+                    progress_type: 'material_access',
+                    progress_value: 1,
+                    session_duration: 0
+                });
+            }
+            
+            window.open(link, '_blank', 'noopener,noreferrer');
+        }
+
+        async function accessLKPD(lkpdId, title, link, subject) {
+            if (currentUser && currentUser.type === 'student') {
+                await saveProgress({
+                    student_id: currentUser.id,
+                    student_name: currentUser.name,
+                    class_grade: currentUser.class,
+                    subject: subject,
+                    material_id: lkpdId,
+                    material_title: title,
+                    progress_type: 'lkpd_access',
+                    progress_value: 1,
+                    session_duration: 0
+                });
+            }
+            
+            window.open(link, '_blank', 'noopener,noreferrer');
+        }
+
+        function updateStudentProgress() {
+            const studentProgress = progressData.filter(p => p.student_id === currentUser.id);
+            const container = document.getElementById('progress-container');
+            
+            if (studentProgress.length === 0) {
+                container.innerHTML = '<p class="text-gray-500 text-center py-8">Belum ada aktivitas pembelajaran</p>';
+                return;
+            }
+
+            const progressBySubject = {};
+            studentProgress.forEach(p => {
+                if (!progressBySubject[p.subject]) {
+                    progressBySubject[p.subject] = { materials: 0, lkpd: 0 };
+                }
+                if (p.progress_type === 'material_access') {
+                    progressBySubject[p.subject].materials++;
+                } else if (p.progress_type === 'lkpd_access') {
+                    progressBySubject[p.subject].lkpd++;
+                }
+            });
+
+            container.innerHTML = Object.entries(progressBySubject).map(([subject, progress]) => `
+                <div class="bg-white rounded-lg shadow-md p-4">
+                    <h4 class="font-semibold text-gray-800 mb-2">${subject}</h4>
+                    <div class="space-y-2">
+                        <div class="flex justify-between text-sm">
+                            <span>Materi diakses:</span>
+                            <span class="font-semibold">${progress.materials}</span>
+                        </div>
+                        <div class="flex justify-between text-sm">
+                            <span>LKPD dikerjakan:</span>
+                            <span class="font-semibold">${progress.lkpd}</span>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function renderStudentProgress() {
+            const container = document.getElementById('progress-container');
+            
+            if (progressData.length === 0) {
+                container.innerHTML = '<p class="text-gray-500 text-center py-8">Belum ada data aktivitas siswa</p>';
+                return;
+            }
+
+            const progressByStudent = {};
+            progressData.forEach(p => {
+                if (!progressByStudent[p.student_name]) {
+                    progressByStudent[p.student_name] = { 
+                        class: p.class_grade, 
+                        materials: 0, 
+                        lkpd: 0,
+                        subjects: new Set()
+                    };
+                }
+                progressByStudent[p.student_name].subjects.add(p.subject);
+                if (p.progress_type === 'material_access') {
+                    progressByStudent[p.student_name].materials++;
+                } else if (p.progress_type === 'lkpd_access') {
+                    progressByStudent[p.student_name].lkpd++;
+                }
+            });
+
+            container.innerHTML = Object.entries(progressByStudent).map(([name, data]) => `
+                <div class="bg-white rounded-lg shadow-md p-4">
+                    <div class="flex justify-between items-start mb-2">
+                        <h4 class="font-semibold text-gray-800">${name}</h4>
+                        <span class="text-sm bg-blue-100 text-blue-800 px-2 py-1 rounded">${data.class}</span>
+                    </div>
+                    <div class="space-y-1 text-sm text-gray-600">
+                        <div class="flex justify-between">
+                            <span>Materi diakses:</span>
+                            <span class="font-semibold">${data.materials}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span>LKPD dikerjakan:</span>
+                            <span class="font-semibold">${data.lkpd}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span>Mata pelajaran:</span>
+                            <span class="font-semibold">${data.subjects.size}</span>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function updateProgressDisplay() {
+            if (currentUser) {
+                if (currentUser.type === 'student') {
+                    updateStudentProgress();
+                } else {
+                    renderStudentProgress();
+                }
+            }
+        }
+
+        // Element SDK Implementation
+        const render = async (config) => {
+            document.getElementById('school-name').textContent = config.school_name || defaultConfig.school_name;
+            document.getElementById('school-vision').textContent = config.school_vision || defaultConfig.school_vision;
+            document.getElementById('welcome-message').textContent = config.welcome_message || defaultConfig.welcome_message;
+            document.getElementById('footer-message').textContent = config.footer_message || defaultConfig.footer_message;
+            
+            // Apply colors
+            const primaryColor = config.primary_color || defaultConfig.primary_color;
+            const secondaryColor = config.secondary_color || defaultConfig.secondary_color;
+            
+            document.documentElement.style.setProperty('--primary-color', primaryColor);
+            document.documentElement.style.setProperty('--secondary-color', secondaryColor);
+        };
+
+        const mapToCapabilities = (config) => ({
+            recolorables: [
+                {
+                    get: () => config.primary_color || defaultConfig.primary_color,
+                    set: (value) => {
+                        if (window.elementSdk) {
+                            window.elementSdk.setConfig({ primary_color: value });
+                        }
+                    }
+                },
+                {
+                    get: () => config.secondary_color || defaultConfig.secondary_color,
+                    set: (value) => {
+                        if (window.elementSdk) {
+                            window.elementSdk.setConfig({ secondary_color: value });
+                        }
+                    }
+                },
+                {
+                    get: () => config.accent_color || defaultConfig.accent_color,
+                    set: (value) => {
+                        if (window.elementSdk) {
+                            window.elementSdk.setConfig({ accent_color: value });
+                        }
+                    }
+                }
+            ],
+            borderables: [],
+            fontEditable: undefined,
+            fontSizeable: undefined
+        });
+
+        const mapToEditPanelValues = (config) => new Map([
+            ["school_name", config.school_name || defaultConfig.school_name],
+            ["school_vision", config.school_vision || defaultConfig.school_vision],
+            ["welcome_message", config.welcome_message || defaultConfig.welcome_message],
+            ["footer_message", config.footer_message || defaultConfig.footer_message]
+        ]);
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', async () => {
+            if (window.dataSdk) {
+                const initResult = await window.dataSdk.init(dataHandler);
+                if (!initResult.isOk) {
+                    console.error("Failed to initialize data SDK");
+                }
+            }
+            
+            if (window.elementSdk) {
+                window.elementSdk.init({
+                    defaultConfig,
+                    render,
+                    mapToCapabilities,
+                    mapToEditPanelValues
+                });
+            }
+
+            await loadAllData();
+        });
+    </script><!-- Login Screen -->
+  <div id="login-screen" class="min-h-full"><!-- Header -->
+   <header class="bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-lg">
+    <div class="container mx-auto px-4 py-8">
+     <div class="text-center">
+      <h1 id="school-name" class="text-4xl font-bold mb-2">SMP Negeri 1 Indonesia</h1>
+      <p id="school-vision" class="text-xl text-blue-100 mb-4">Mewujudkan Generasi Cerdas, Berkarakter, dan Berdaya Saing Global</p>
+      <p id="welcome-message" class="text-lg text-blue-200">Selamat datang di portal pembelajaran digital yang inovatif</p>
+     </div>
+    </div>
+   </header><!-- Login Section -->
+   <div class="container mx-auto px-4 py-12">
+    <div class="max-w-md mx-auto bg-white rounded-lg shadow-lg p-8">
+     <div class="text-center mb-8">
+      <div class="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4"><span class="text-3xl">🎓</span>
+      </div>
+      <h2 class="text-2xl font-bold text-gray-800 mb-2">Portal Pembelajaran</h2>
+      <p class="text-gray-600">Masuk untuk mengakses materi dan LKPD</p>
+     </div>
+     <form onsubmit="handleLogin(event)" class="space-y-6">
+      <div><label class="block text-sm font-medium text-gray-700 mb-2">Jenis Pengguna</label> <select name="userType" required class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"> <option value="">Pilih jenis pengguna</option> <option value="student">Siswa</option> <option value="teacher">Guru</option> </select>
+      </div>
+      <div><label class="block text-sm font-medium text-gray-700 mb-2">ID Pengguna</label> <input type="text" name="identifier" required placeholder="Masukkan NISN (siswa) atau NIP (guru)" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div><button type="submit" class="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 transition-colors font-medium">
+       <div class="loading-indicator hidden items-center justify-center">
+        <div class="loading-spinner mr-2"></div> Memuat...
+       </div><span class="login-text">Masuk</span> </button>
+     </form>
+     <div class="mt-6 p-4 bg-gray-50 rounded-lg">
+      <h3 class="font-semibold text-gray-800 mb-2">Contoh ID:</h3>
+      <div class="text-sm text-gray-600 space-y-1">
+       <p><strong>Siswa:</strong> 2024001, 2024002, 2024003</p>
+       <p><strong>Guru:</strong> 196801011990031001</p>
+      </div>
+     </div>
+    </div>
+   </div>
+  </div><!-- Dashboard Screen -->
+  <div id="dashboard-screen" class="min-h-full hidden"><!-- Header -->
+   <header class="bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-lg">
+    <div class="container mx-auto px-4 py-6">
+     <div class="flex items-center justify-between">
+      <div>
+       <h1 class="text-2xl font-bold">Dashboard Pembelajaran</h1>
+       <p class="text-blue-100"><span id="user-name">Pengguna</span> • <span id="user-info">Info</span></p>
+      </div><button onclick="logout()" class="bg-blue-500 hover:bg-blue-400 px-4 py-2 rounded-lg transition-colors"> Logout </button>
+     </div>
+    </div>
+   </header>
+   <div class="container mx-auto px-4 py-8"><!-- Navigation Tabs -->
+    <div class="flex space-x-1 bg-gray-100 p-1 rounded-lg mb-8"><button onclick="showTab('materials')" id="materials-tab" class="flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors bg-white text-blue-600 shadow-sm"> 📚 Materi Pembelajaran </button> <button onclick="showTab('lkpd')" id="lkpd-tab" class="flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors text-gray-500 hover:text-gray-700"> 📝 LKPD </button> <button onclick="showTab('progress')" id="progress-tab" class="flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors text-gray-500 hover:text-gray-700"> 📊 Progress </button>
+    </div><!-- Tab Contents -->
+    <div id="materials-content" class="tab-content">
+     <div class="mb-6">
+      <h2 class="text-xl font-bold text-gray-800 mb-2">Materi Pembelajaran</h2>
+      <p class="text-gray-600">Akses video pembelajaran dan dokumen materi</p>
+     </div>
+     <div id="materials-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div class="loading-indicator flex items-center justify-center py-12">
+       <div class="loading-spinner mr-2"></div><span>Memuat materi...</span>
+      </div>
+     </div>
+    </div>
+    <div id="lkpd-content" class="tab-content hidden">
+     <div class="mb-6">
+      <h2 class="text-xl font-bold text-gray-800 mb-2">Lembar Kerja Peserta Didik</h2>
+      <p class="text-gray-600">Kerjakan LKPD untuk memperdalam pemahaman</p>
+     </div>
+     <div id="lkpd-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div class="loading-indicator flex items-center justify-center py-12">
+       <div class="loading-spinner mr-2"></div><span>Memuat LKPD...</span>
+      </div>
+     </div>
+    </div>
+    <div id="progress-content" class="tab-content hidden">
+     <div class="mb-6">
+      <h2 class="text-xl font-bold text-gray-800 mb-2">Progress Pembelajaran</h2>
+      <p class="text-gray-600">Pantau aktivitas dan kemajuan pembelajaran</p>
+     </div>
+     <div id="progress-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div class="loading-indicator flex items-center justify-center py-12">
+       <div class="loading-spinner mr-2"></div><span>Memuat progress...</span>
+      </div>
+     </div>
+    </div>
+   </div>
+  </div><!-- Footer -->
+  <footer class="bg-gray-800 text-white py-8 mt-12">
+   <div class="container mx-auto px-4 text-center">
+    <p id="footer-message" class="text-lg font-semibold mb-2">Merdeka Belajar - Indonesia Maju 2045</p>
+    <p class="text-gray-400">© 2024 Sistem Pembelajaran Interaktif SMP</p>
+   </div>
+  </footer>
+  <script>
+        // Tab Management
+        function showTab(tabName) {
+            // Hide all tab contents
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.add('hidden');
+            });
+            
+            // Remove active class from all tabs
+            document.querySelectorAll('[id$="-tab"]').forEach(tab => {
+                tab.classList.remove('bg-white', 'text-blue-600', 'shadow-sm');
+                tab.classList.add('text-gray-500', 'hover:text-gray-700');
+            });
+            
+            // Show selected tab content
+            document.getElementById(`${tabName}-content`).classList.remove('hidden');
+            
+            // Add active class to selected tab
+            const activeTab = document.getElementById(`${tabName}-tab`);
+            activeTab.classList.add('bg-white', 'text-blue-600', 'shadow-sm');
+            activeTab.classList.remove('text-gray-500', 'hover:text-gray-700');
+        }
+    </script>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'98efba160453ef71',t:'MTc2MDUzNTYxMi4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
