@@ -144,70 +144,154 @@
 
         async function fetchGoogleSheetData(sheetName) {
             try {
-                // Coba beberapa format URL yang berbeda
+                console.log(`🔄 Memulai fetch untuk sheet: ${sheetName}`);
+                
+                // Coba beberapa format URL yang berbeda dengan encoding yang tepat
+                const encodedSheetName = encodeURIComponent(sheetName);
                 const urls = [
+                    `https://docs.google.com/spreadsheets/d/${SHEET_CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodedSheetName}`,
                     `https://docs.google.com/spreadsheets/d/${SHEET_CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&sheet=${sheetName}`,
-                    `https://docs.google.com/spreadsheets/d/${SHEET_CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&gid=0&sheet=${sheetName}`,
-                    `https://docs.google.com/spreadsheets/d/${SHEET_CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&headers=1&sheet=${sheetName}`
+                    `https://docs.google.com/spreadsheets/d/${SHEET_CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&headers=1&sheet=${encodedSheetName}`,
+                    `https://docs.google.com/spreadsheets/d/${SHEET_CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&headers=1&sheet=${sheetName}`,
+                    // Tambahan untuk sheet dengan nama khusus
+                    `https://docs.google.com/spreadsheets/d/${SHEET_CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&gid=0&range=${sheetName}!A:Z`,
+                    `https://docs.google.com/spreadsheets/d/${SHEET_CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&range=${sheetName}!A1:Z1000`
                 ];
 
                 let lastError = null;
+                let attemptCount = 0;
                 
                 for (const url of urls) {
+                    attemptCount++;
                     try {
-                        console.log(`Mencoba fetch ${sheetName} dari:`, url);
-                        const response = await fetch(url);
+                        console.log(`📡 Percobaan ${attemptCount}: ${url}`);
+                        
+                        const response = await fetch(url, {
+                            method: 'GET',
+                            headers: {
+                                'Accept': 'application/json, text/plain, */*',
+                                'Cache-Control': 'no-cache'
+                            }
+                        });
                         
                         if (!response.ok) {
                             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                         }
                         
                         const text = await response.text();
+                        console.log(`📄 Response length untuk ${sheetName}:`, text.length);
                         
-                        // Handle different response formats
+                        if (text.length < 50) {
+                            throw new Error('Response terlalu pendek, kemungkinan sheet tidak ditemukan');
+                        }
+                        
+                        // Handle different response formats dengan lebih robust
                         let jsonText = text;
+                        
+                        // Format 1: /*O_o*/\ngoogle.visualization.Query.setResponse(...)
                         if (text.startsWith('/*O_o*/\ngoogle.visualization.Query.setResponse(')) {
                             jsonText = text.substring(47, text.length - 2);
-                        } else if (text.includes('google.visualization.Query.setResponse(')) {
-                            const start = text.indexOf('(') + 1;
-                            const end = text.lastIndexOf(')');
-                            jsonText = text.substring(start, end);
+                        }
+                        // Format 2: google.visualization.Query.setResponse(...)
+                        else if (text.includes('google.visualization.Query.setResponse(')) {
+                            const start = text.indexOf('google.visualization.Query.setResponse(') + 39;
+                            const end = text.lastIndexOf(');');
+                            if (end > start) {
+                                jsonText = text.substring(start, end);
+                            }
+                        }
+                        // Format 3: Direct JSON
+                        else if (text.trim().startsWith('{')) {
+                            jsonText = text;
                         }
                         
                         const json = JSON.parse(jsonText);
-                        
-                        if (!json.table || !json.table.rows || json.table.rows.length === 0) {
-                            console.warn(`Sheet ${sheetName} kosong atau tidak ditemukan`);
-                            continue;
-                        }
-                        
-                        const headers = json.table.cols.map(col => col.label || col.id || '');
-                        const data = json.table.rows.map(row => {
-                            const obj = {};
-                            headers.forEach((header, index) => {
-                                const cell = row.c[index];
-                                obj[header] = cell ? (cell.f || cell.v || '') : '';
-                            });
-                            return obj;
-                        }).filter(row => {
-                            // Filter out empty rows
-                            return Object.values(row).some(value => value && value.toString().trim() !== '');
+                        console.log(`🔍 Parsed JSON structure untuk ${sheetName}:`, {
+                            hasTable: !!json.table,
+                            hasRows: !!(json.table && json.table.rows),
+                            rowCount: json.table && json.table.rows ? json.table.rows.length : 0,
+                            hasColumns: !!(json.table && json.table.cols),
+                            colCount: json.table && json.table.cols ? json.table.cols.length : 0
                         });
                         
-                        console.log(`✅ Berhasil memuat ${sheetName}:`, data.length, 'records');
+                        // Cek apakah ada error dalam response
+                        if (json.status === 'error') {
+                            throw new Error(`Google Sheets API Error: ${json.errors?.[0]?.detailed_message || 'Unknown error'}`);
+                        }
+                        
+                        if (!json.table) {
+                            throw new Error('Tidak ada data table dalam response');
+                        }
+                        
+                        if (!json.table.rows || json.table.rows.length === 0) {
+                            console.warn(`⚠️ Sheet ${sheetName} kosong atau tidak ada data`);
+                            // Jangan langsung continue, return empty array untuk sheet kosong
+                            return [];
+                        }
+                        
+                        if (!json.table.cols || json.table.cols.length === 0) {
+                            throw new Error('Tidak ada kolom yang ditemukan');
+                        }
+                        
+                        const headers = json.table.cols.map(col => {
+                            return col.label || col.id || `Column_${col.index || 0}`;
+                        });
+                        
+                        console.log(`📋 Headers untuk ${sheetName}:`, headers);
+                        
+                        const data = json.table.rows.map((row, rowIndex) => {
+                            const obj = {};
+                            headers.forEach((header, colIndex) => {
+                                const cell = row.c && row.c[colIndex];
+                                let value = '';
+                                
+                                if (cell) {
+                                    // Prioritas: formatted value, lalu value, lalu empty string
+                                    value = cell.f || cell.v || '';
+                                    
+                                    // Convert to string dan trim
+                                    if (value !== null && value !== undefined) {
+                                        value = value.toString().trim();
+                                    }
+                                }
+                                
+                                obj[header] = value;
+                            });
+                            return obj;
+                        }).filter((row, index) => {
+                            // Filter out completely empty rows
+                            const hasData = Object.values(row).some(value => 
+                                value && value.toString().trim() !== ''
+                            );
+                            
+                            if (!hasData) {
+                                console.log(`🗑️ Filtering out empty row ${index} in ${sheetName}`);
+                            }
+                            
+                            return hasData;
+                        });
+                        
+                        console.log(`✅ Berhasil memuat ${sheetName}: ${data.length} records`);
+                        console.log(`📊 Sample data untuk ${sheetName}:`, data.slice(0, 2));
+                        
                         return data;
                         
                     } catch (error) {
                         lastError = error;
-                        console.warn(`Gagal dengan URL: ${url}`, error.message);
+                        console.warn(`❌ Percobaan ${attemptCount} gagal untuk ${sheetName}:`, error.message);
+                        
+                        // Jika ini percobaan terakhir, log detail error
+                        if (attemptCount === urls.length) {
+                            console.error(`🚨 Semua percobaan gagal untuk ${sheetName}:`, error);
+                        }
                         continue;
                     }
                 }
                 
-                throw lastError || new Error('Semua URL gagal');
+                throw lastError || new Error(`Semua ${urls.length} percobaan URL gagal untuk sheet ${sheetName}`);
                 
             } catch (error) {
-                console.error(`❌ Error fetching ${sheetName}:`, error);
+                console.error(`💥 Fatal error fetching ${sheetName}:`, error);
                 showNotification(`Gagal memuat ${sheetName}: ${error.message}`, 'error');
                 return [];
             }
@@ -366,42 +450,91 @@
                 let user = null;
                 let errorMessage = '';
                 
+                console.log(`🔍 Mencari ${userType} dengan ID: "${identifier}"`);
+                
                 if (userType === 'student') {
-                    user = studentsData.find(s => s.NISN && s.NISN.toString() === identifier.toString());
+                    console.log(`👥 Data siswa tersedia:`, studentsData.length, 'records');
+                    console.log(`📋 Sample data siswa:`, studentsData.slice(0, 3));
+                    
+                    // Cari dengan berbagai kemungkinan field name dan format
+                    user = studentsData.find(s => {
+                        const nisn = s.NISN || s.nisn || s.Nisn || s['NISN'] || '';
+                        return nisn && nisn.toString().trim() === identifier.toString().trim();
+                    });
+                    
                     if (user) {
                         user.type = 'student';
-                        user.id = user.NISN;
-                        user.name = user.Nama;
-                        user.class = user.Kelas;
+                        user.id = user.NISN || user.nisn || user.Nisn || user['NISN'];
+                        user.name = user.Nama || user.nama || user.Name || user['Nama'];
+                        user.class = user.Kelas || user.kelas || user.Class || user['Kelas'];
+                        console.log(`✅ Siswa ditemukan:`, user);
                     } else {
                         // Cek apakah ada data siswa yang mirip
-                        const similarStudents = studentsData.filter(s => 
-                            s.NISN && s.NISN.toString().includes(identifier)
-                        );
+                        const similarStudents = studentsData.filter(s => {
+                            const nisn = s.NISN || s.nisn || s.Nisn || s['NISN'] || '';
+                            return nisn && nisn.toString().includes(identifier);
+                        });
+                        
+                        console.log(`🔍 Siswa dengan ID mirip:`, similarStudents);
                         
                         if (similarStudents.length > 0) {
-                            errorMessage = `NISN "${identifier}" tidak ditemukan. Mungkin maksud Anda: ${similarStudents.slice(0, 3).map(s => s.NISN).join(', ')}`;
+                            const suggestions = similarStudents.slice(0, 3).map(s => 
+                                s.NISN || s.nisn || s.Nisn || s['NISN']
+                            ).join(', ');
+                            errorMessage = `NISN "${identifier}" tidak ditemukan. Mungkin maksud Anda: ${suggestions}`;
                         } else {
                             errorMessage = `NISN "${identifier}" tidak terdaftar. Pastikan NISN sudah benar dan terdaftar di Google Sheets.`;
                         }
+                        
+                        // Debug info untuk troubleshooting
+                        console.log(`❌ NISN tidak ditemukan. Available NISNs:`, 
+                            studentsData.map(s => s.NISN || s.nisn || s.Nisn || s['NISN']).filter(Boolean)
+                        );
                     }
                 } else if (userType === 'teacher') {
-                    user = teachersData.find(t => t.NIP && t.NIP.toString() === identifier.toString());
+                    console.log(`👨‍🏫 Data guru tersedia:`, teachersData.length, 'records');
+                    console.log(`📋 Sample data guru:`, teachersData.slice(0, 3));
+                    
+                    // Cari dengan berbagai kemungkinan field name dan format
+                    user = teachersData.find(t => {
+                        const nip = t.NIP || t.nip || t.Nip || t['NIP'] || '';
+                        const result = nip && nip.toString().trim() === identifier.toString().trim();
+                        console.log(`🔍 Checking teacher NIP: "${nip}" vs "${identifier}" = ${result}`);
+                        return result;
+                    });
+                    
                     if (user) {
                         user.type = 'teacher';
-                        user.id = user.NIP;
-                        user.name = user.Nama;
-                        user.subject = user['Mata Pelajaran'];
+                        user.id = user.NIP || user.nip || user.Nip || user['NIP'];
+                        user.name = user.Nama || user.nama || user.Name || user['Nama'];
+                        user.subject = user['Mata Pelajaran'] || user['mata_pelajaran'] || user.MataPelajaran || user.Subject || user.subject;
+                        console.log(`✅ Guru ditemukan:`, user);
                     } else {
                         // Cek apakah ada data guru yang mirip
-                        const similarTeachers = teachersData.filter(t => 
-                            t.NIP && t.NIP.toString().includes(identifier)
-                        );
+                        const similarTeachers = teachersData.filter(t => {
+                            const nip = t.NIP || t.nip || t.Nip || t['NIP'] || '';
+                            return nip && nip.toString().includes(identifier);
+                        });
+                        
+                        console.log(`🔍 Guru dengan NIP mirip:`, similarTeachers);
                         
                         if (similarTeachers.length > 0) {
-                            errorMessage = `NIP "${identifier}" tidak ditemukan. Mungkin maksud Anda: ${similarTeachers.slice(0, 3).map(t => t.NIP).join(', ')}`;
+                            const suggestions = similarTeachers.slice(0, 3).map(t => 
+                                t.NIP || t.nip || t.Nip || t['NIP']
+                            ).join(', ');
+                            errorMessage = `NIP "${identifier}" tidak ditemukan. Mungkin maksud Anda: ${suggestions}`;
                         } else {
                             errorMessage = `NIP "${identifier}" tidak terdaftar. Pastikan NIP sudah benar dan terdaftar di Google Sheets.`;
+                        }
+                        
+                        // Debug info untuk troubleshooting
+                        console.log(`❌ NIP tidak ditemukan. Available NIPs:`, 
+                            teachersData.map(t => t.NIP || t.nip || t.Nip || t['NIP']).filter(Boolean)
+                        );
+                        
+                        // Tampilkan struktur data guru untuk debugging
+                        if (teachersData.length > 0) {
+                            console.log(`🔍 Struktur data guru pertama:`, Object.keys(teachersData[0]));
                         }
                     }
                 }
@@ -514,9 +647,15 @@
                             <h4 class="font-semibold text-blue-600 mb-2">📝 Data LKPD (${lkpdData.length} records)</h4>
                             <div class="bg-gray-50 p-3 rounded text-xs max-h-32 overflow-y-auto font-mono">
                                 ${lkpdData.length > 0 ? 
-                                    lkpdData.slice(0, 3).map(l => 
-                                        `ID: ${l.ID || 'N/A'} | Judul: ${l.Judul || 'N/A'} | Mapel: ${l['Mata Pelajaran'] || 'N/A'} | Kelas: ${l.Kelas || 'N/A'}`
-                                    ).join('<br>') + (lkpdData.length > 3 ? '<br>... dan ' + (lkpdData.length - 3) + ' lainnya' : '')
+                                    lkpdData.slice(0, 3).map(l => {
+                                        const id = l.ID || l.id || l.Id || 'N/A';
+                                        const judul = l.Judul || l.judul || l.Title || 'N/A';
+                                        const mapel = l['Mata Pelajaran'] || l['mata_pelajaran'] || l.MataPelajaran || l.Subject || 'N/A';
+                                        const kelas = l.Kelas || l.kelas || l.Class || 'N/A';
+                                        return `ID: ${id} | Judul: ${judul} | Mapel: ${mapel} | Kelas: ${kelas}`;
+                                    }).join('<br>') + (lkpdData.length > 3 ? '<br>... dan ' + (lkpdData.length - 3) + ' lainnya' : '') +
+                                    '<br><br><strong>🔍 Struktur kolom LKPD:</strong><br>' + 
+                                    (lkpdData.length > 0 ? Object.keys(lkpdData[0]).join(', ') : 'Tidak ada data')
                                     : '<span class="text-red-600">❌ Tidak ada data LKPD yang dimuat</span>'
                                 }
                             </div>
@@ -602,9 +741,23 @@
         }
 
         function showStudentDashboard() {
-            const studentClass = currentUser.class.charAt(0); // Get class number (7, 8, 9)
-            const availableMaterials = materialsData.filter(m => m.Kelas === studentClass);
-            const availableLKPD = lkpdData.filter(l => l.Kelas === studentClass);
+            const studentClass = currentUser.class ? currentUser.class.charAt(0) : ''; // Get class number (7, 8, 9)
+            console.log(`👥 Student dashboard - Class: ${currentUser.class}, Filter: ${studentClass}`);
+            
+            // Filter materials dengan berbagai kemungkinan field names
+            const availableMaterials = materialsData.filter(m => {
+                const kelas = m.Kelas || m.kelas || m.Class || m.class || m['Kelas'] || '';
+                return kelas.toString() === studentClass.toString();
+            });
+            
+            // Filter LKPD dengan berbagai kemungkinan field names
+            const availableLKPD = lkpdData.filter(l => {
+                const kelas = l.Kelas || l.kelas || l.Class || l.class || l['Kelas'] || '';
+                return kelas.toString() === studentClass.toString();
+            });
+
+            console.log(`📚 Available materials for class ${studentClass}:`, availableMaterials.length);
+            console.log(`📝 Available LKPD for class ${studentClass}:`, availableLKPD.length);
 
             renderMaterials(availableMaterials);
             renderLKPD(availableLKPD);
@@ -612,9 +765,23 @@
         }
 
         function showTeacherDashboard() {
-            const teacherSubject = currentUser.subject;
-            const subjectMaterials = materialsData.filter(m => m['Mata Pelajaran'] === teacherSubject);
-            const subjectLKPD = lkpdData.filter(l => l['Mata Pelajaran'] === teacherSubject);
+            const teacherSubject = currentUser.subject || '';
+            console.log(`👨‍🏫 Teacher dashboard - Subject: ${teacherSubject}`);
+            
+            // Filter materials dengan berbagai kemungkinan field names
+            const subjectMaterials = materialsData.filter(m => {
+                const mataPelajaran = m['Mata Pelajaran'] || m['mata_pelajaran'] || m.MataPelajaran || m.Subject || m.subject || '';
+                return mataPelajaran === teacherSubject;
+            });
+            
+            // Filter LKPD dengan berbagai kemungkinan field names
+            const subjectLKPD = lkpdData.filter(l => {
+                const mataPelajaran = l['Mata Pelajaran'] || l['mata_pelajaran'] || l.MataPelajaran || l.Subject || l.subject || '';
+                return mataPelajaran === teacherSubject;
+            });
+
+            console.log(`📚 Available materials for subject ${teacherSubject}:`, subjectMaterials.length);
+            console.log(`📝 Available LKPD for subject ${teacherSubject}:`, subjectLKPD.length);
 
             renderMaterials(subjectMaterials);
             renderLKPD(subjectLKPD);
@@ -661,27 +828,43 @@
             const container = document.getElementById('lkpd-container');
             container.innerHTML = '';
 
+            console.log(`📝 Rendering LKPD:`, lkpdList.length, 'items');
+            console.log(`📋 Sample LKPD data:`, lkpdList.slice(0, 2));
+
             if (lkpdList.length === 0) {
                 container.innerHTML = '<p class="text-gray-500 text-center py-8">Belum ada LKPD tersedia</p>';
                 return;
             }
 
-            lkpdList.forEach(lkpd => {
+            lkpdList.forEach((lkpd, index) => {
+                // Handle berbagai kemungkinan field names
+                const id = lkpd.ID || lkpd.id || lkpd.Id || lkpd['ID'] || `lkpd-${index}`;
+                const judul = lkpd.Judul || lkpd.judul || lkpd.Title || lkpd.title || lkpd['Judul'] || 'LKPD Tanpa Judul';
+                const deskripsi = lkpd.Deskripsi || lkpd.deskripsi || lkpd.Description || lkpd.description || lkpd['Deskripsi'] || 'Tidak ada deskripsi';
+                const mataPelajaran = lkpd['Mata Pelajaran'] || lkpd['mata_pelajaran'] || lkpd.MataPelajaran || lkpd.Subject || lkpd.subject || lkpd['Mata Pelajaran'] || 'Umum';
+                const kelas = lkpd.Kelas || lkpd.kelas || lkpd.Class || lkpd.class || lkpd['Kelas'] || '-';
+                const link = lkpd.Link || lkpd.link || lkpd.URL || lkpd.url || lkpd['Link'] || '#';
+
+                console.log(`📝 LKPD ${index + 1}:`, {
+                    id, judul, deskripsi, mataPelajaran, kelas, link,
+                    originalData: lkpd
+                });
+
                 const card = document.createElement('div');
                 card.className = 'bg-white rounded-lg shadow-md p-6 card-hover fade-in';
                 card.innerHTML = `
                     <div class="flex items-start justify-between mb-4">
                         <div class="flex-1">
-                            <h3 class="text-lg font-semibold text-gray-800 mb-2">${lkpd.Judul}</h3>
-                            <p class="text-sm text-gray-600 mb-2">${lkpd.Deskripsi}</p>
+                            <h3 class="text-lg font-semibold text-gray-800 mb-2">${judul}</h3>
+                            <p class="text-sm text-gray-600 mb-2">${deskripsi}</p>
                             <div class="flex items-center space-x-4 text-sm text-gray-500">
-                                <span class="bg-orange-100 text-orange-800 px-2 py-1 rounded">${lkpd['Mata Pelajaran']}</span>
-                                <span class="bg-green-100 text-green-800 px-2 py-1 rounded">Kelas ${lkpd.Kelas}</span>
+                                <span class="bg-orange-100 text-orange-800 px-2 py-1 rounded">${mataPelajaran}</span>
+                                <span class="bg-green-100 text-green-800 px-2 py-1 rounded">Kelas ${kelas}</span>
                             </div>
                         </div>
                         <div class="ml-4">📝</div>
                     </div>
-                    <button onclick="accessLKPD('${lkpd.ID}', '${lkpd.Judul}', '${lkpd.Link}', '${lkpd['Mata Pelajaran']}')" 
+                    <button onclick="accessLKPD('${id}', '${judul.replace(/'/g, "\\'")}', '${link}', '${mataPelajaran.replace(/'/g, "\\'")}')" 
                             class="w-full bg-orange-600 text-white py-2 px-4 rounded-lg hover:bg-orange-700 transition-colors">
                         Kerjakan LKPD
                     </button>
@@ -1038,5 +1221,5 @@
             activeTab.classList.remove('text-gray-500', 'hover:text-gray-700');
         }
     </script>
- <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'98efe17287fa9d0c',t:'MTc2MDUzNzIyNC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'98efef2a050e55de',t:'MTc2MDUzNzc4Ni4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
