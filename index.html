@@ -92,6 +92,15 @@
             PROGRESS_SHEET: 'ProgressSiswa'
         };
 
+        // Sheet column mappings untuk memastikan kompatibilitas
+        const SHEET_COLUMNS = {
+            DataSiswa: ['NISN', 'Nama', 'Kelas'],
+            DataGuru: ['NIP', 'Nama', 'Mata Pelajaran'],
+            MateriPelajaran: ['ID', 'Judul', 'Deskripsi', 'Mata Pelajaran', 'Kelas', 'Tipe', 'Link'],
+            LKPD: ['ID', 'Judul', 'Deskripsi', 'Mata Pelajaran', 'Kelas', 'Link'],
+            ProgressSiswa: ['NISN', 'Nama', 'Kelas', 'Mata Pelajaran', 'Materi/LKPD', 'Jenis', 'Waktu']
+        };
+
         // Global State
         let currentUser = null;
         let studentsData = [];
@@ -135,25 +144,71 @@
 
         async function fetchGoogleSheetData(sheetName) {
             try {
-                const url = `https://docs.google.com/spreadsheets/d/${SHEET_CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&sheet=${sheetName}`;
-                const response = await fetch(url);
-                const text = await response.text();
-                const json = JSON.parse(text.substr(47).slice(0, -2));
+                // Coba beberapa format URL yang berbeda
+                const urls = [
+                    `https://docs.google.com/spreadsheets/d/${SHEET_CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&sheet=${sheetName}`,
+                    `https://docs.google.com/spreadsheets/d/${SHEET_CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&gid=0&sheet=${sheetName}`,
+                    `https://docs.google.com/spreadsheets/d/${SHEET_CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&headers=1&sheet=${sheetName}`
+                ];
+
+                let lastError = null;
                 
-                if (!json.table || !json.table.rows) return [];
+                for (const url of urls) {
+                    try {
+                        console.log(`Mencoba fetch ${sheetName} dari:`, url);
+                        const response = await fetch(url);
+                        
+                        if (!response.ok) {
+                            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                        }
+                        
+                        const text = await response.text();
+                        
+                        // Handle different response formats
+                        let jsonText = text;
+                        if (text.startsWith('/*O_o*/\ngoogle.visualization.Query.setResponse(')) {
+                            jsonText = text.substring(47, text.length - 2);
+                        } else if (text.includes('google.visualization.Query.setResponse(')) {
+                            const start = text.indexOf('(') + 1;
+                            const end = text.lastIndexOf(')');
+                            jsonText = text.substring(start, end);
+                        }
+                        
+                        const json = JSON.parse(jsonText);
+                        
+                        if (!json.table || !json.table.rows || json.table.rows.length === 0) {
+                            console.warn(`Sheet ${sheetName} kosong atau tidak ditemukan`);
+                            continue;
+                        }
+                        
+                        const headers = json.table.cols.map(col => col.label || col.id || '');
+                        const data = json.table.rows.map(row => {
+                            const obj = {};
+                            headers.forEach((header, index) => {
+                                const cell = row.c[index];
+                                obj[header] = cell ? (cell.f || cell.v || '') : '';
+                            });
+                            return obj;
+                        }).filter(row => {
+                            // Filter out empty rows
+                            return Object.values(row).some(value => value && value.toString().trim() !== '');
+                        });
+                        
+                        console.log(`✅ Berhasil memuat ${sheetName}:`, data.length, 'records');
+                        return data;
+                        
+                    } catch (error) {
+                        lastError = error;
+                        console.warn(`Gagal dengan URL: ${url}`, error.message);
+                        continue;
+                    }
+                }
                 
-                const headers = json.table.cols.map(col => col.label || '');
-                return json.table.rows.map(row => {
-                    const obj = {};
-                    headers.forEach((header, index) => {
-                        const cell = row.c[index];
-                        obj[header] = cell ? cell.v : '';
-                    });
-                    return obj;
-                });
+                throw lastError || new Error('Semua URL gagal');
+                
             } catch (error) {
-                console.error(`Error fetching ${sheetName}:`, error);
-                showNotification(`Gagal memuat data ${sheetName}`, 'error');
+                console.error(`❌ Error fetching ${sheetName}:`, error);
+                showNotification(`Gagal memuat ${sheetName}: ${error.message}`, 'error');
                 return [];
             }
         }
@@ -189,6 +244,7 @@
 
             showLoading(true);
             try {
+                // Simpan ke Data SDK (Canva Sheet internal)
                 const result = await window.dataSdk.create({
                     student_id: progressData.student_id,
                     student_name: progressData.student_name,
@@ -203,6 +259,8 @@
                 });
 
                 if (result.isOk) {
+                    // Juga coba kirim ke Google Sheets ProgressSiswa (opsional)
+                    await saveToGoogleSheetProgress(progressData);
                     showNotification('Progress berhasil disimpan');
                 } else {
                     showNotification('Gagal menyimpan progress', 'error');
@@ -211,6 +269,55 @@
                 showNotification('Error menyimpan progress', 'error');
             } finally {
                 showLoading(false);
+            }
+        }
+
+        async function saveToGoogleSheetProgress(progressData) {
+            try {
+                // Format data untuk Google Sheets
+                const timestamp = new Date().toLocaleString('id-ID', {
+                    timeZone: 'Asia/Jakarta',
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                });
+
+                const jenisAktivitas = progressData.progress_type === 'material_access' ? 'Akses Materi' : 'Mengerjakan LKPD';
+                
+                // Buat URL untuk Google Apps Script (jika tersedia)
+                // Ini adalah contoh implementasi - perlu Google Apps Script di sisi server
+                const formData = new FormData();
+                formData.append('nisn', progressData.student_id);
+                formData.append('nama', progressData.student_name);
+                formData.append('kelas', progressData.class_grade);
+                formData.append('mataPelajaran', progressData.subject);
+                formData.append('materiLKPD', progressData.material_title);
+                formData.append('jenis', jenisAktivitas);
+                formData.append('waktu', timestamp);
+
+                // Catatan: URL ini perlu diganti dengan Google Apps Script yang sebenarnya
+                // const scriptUrl = 'https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec';
+                // const response = await fetch(scriptUrl, {
+                //     method: 'POST',
+                //     body: formData
+                // });
+
+                console.log('📝 Data progress yang akan disimpan ke Google Sheets:', {
+                    NISN: progressData.student_id,
+                    Nama: progressData.student_name,
+                    Kelas: progressData.class_grade,
+                    'Mata Pelajaran': progressData.subject,
+                    'Materi/LKPD': progressData.material_title,
+                    Jenis: jenisAktivitas,
+                    Waktu: timestamp
+                });
+
+            } catch (error) {
+                console.warn('Gagal menyimpan ke Google Sheets (opsional):', error);
+                // Tidak menampilkan error ke user karena ini opsional
             }
         }
 
@@ -329,61 +436,132 @@
             const debugModal = document.createElement('div');
             debugModal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4';
             debugModal.innerHTML = `
-                <div class="bg-white rounded-lg max-w-4xl w-full max-h-96 overflow-y-auto p-6">
+                <div class="bg-white rounded-lg max-w-5xl w-full max-h-[90vh] overflow-y-auto p-6">
                     <div class="flex justify-between items-center mb-4">
-                        <h3 class="text-lg font-bold">Debug Info - Data yang Dimuat</h3>
-                        <button onclick="this.closest('.fixed').remove()" class="text-gray-500 hover:text-gray-700">✕</button>
+                        <h3 class="text-lg font-bold">🔍 Debug Info - Analisis Koneksi Google Sheets</h3>
+                        <button onclick="this.closest('.fixed').remove()" class="text-gray-500 hover:text-gray-700 text-xl">✕</button>
                     </div>
                     
-                    <div class="space-y-4">
-                        <div>
-                            <h4 class="font-semibold text-blue-600">📊 Status Koneksi Google Sheets:</h4>
-                            <p class="text-sm ${studentsData.length > 0 || teachersData.length > 0 ? 'text-green-600' : 'text-red-600'}">
-                                ${studentsData.length > 0 || teachersData.length > 0 ? '✅ Berhasil terhubung' : '❌ Gagal terhubung'}
-                            </p>
+                    <div class="space-y-6">
+                        <!-- Status Koneksi -->
+                        <div class="p-4 border rounded-lg">
+                            <h4 class="font-semibold text-blue-600 mb-2">📊 Status Koneksi Google Sheets</h4>
+                            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                                <div class="text-center p-2 rounded ${studentsData.length > 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}">
+                                    <div class="font-semibold">${studentsData.length > 0 ? '✅' : '❌'}</div>
+                                    <div>DataSiswa</div>
+                                    <div class="text-xs">${studentsData.length} records</div>
+                                </div>
+                                <div class="text-center p-2 rounded ${teachersData.length > 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}">
+                                    <div class="font-semibold">${teachersData.length > 0 ? '✅' : '❌'}</div>
+                                    <div>DataGuru</div>
+                                    <div class="text-xs">${teachersData.length} records</div>
+                                </div>
+                                <div class="text-center p-2 rounded ${materialsData.length > 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}">
+                                    <div class="font-semibold">${materialsData.length > 0 ? '✅' : '❌'}</div>
+                                    <div>MateriPelajaran</div>
+                                    <div class="text-xs">${materialsData.length} records</div>
+                                </div>
+                                <div class="text-center p-2 rounded ${lkpdData.length > 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}">
+                                    <div class="font-semibold">${lkpdData.length > 0 ? '✅' : '❌'}</div>
+                                    <div>LKPD</div>
+                                    <div class="text-xs">${lkpdData.length} records</div>
+                                </div>
+                            </div>
                         </div>
 
-                        <div>
-                            <h4 class="font-semibold text-blue-600">👥 Data Siswa (${studentsData.length} records):</h4>
-                            <div class="bg-gray-50 p-3 rounded text-xs max-h-32 overflow-y-auto">
+                        <!-- Data Siswa -->
+                        <div class="border rounded-lg p-4">
+                            <h4 class="font-semibold text-blue-600 mb-2">👥 Data Siswa (${studentsData.length} records)</h4>
+                            <div class="bg-gray-50 p-3 rounded text-xs max-h-32 overflow-y-auto font-mono">
                                 ${studentsData.length > 0 ? 
                                     studentsData.slice(0, 5).map(s => 
                                         `NISN: ${s.NISN || 'N/A'} | Nama: ${s.Nama || 'N/A'} | Kelas: ${s.Kelas || 'N/A'}`
                                     ).join('<br>') + (studentsData.length > 5 ? '<br>... dan ' + (studentsData.length - 5) + ' lainnya' : '')
-                                    : 'Tidak ada data siswa yang dimuat'
+                                    : '<span class="text-red-600">❌ Tidak ada data siswa yang dimuat</span>'
                                 }
                             </div>
                         </div>
 
-                        <div>
-                            <h4 class="font-semibold text-blue-600">👨‍🏫 Data Guru (${teachersData.length} records):</h4>
-                            <div class="bg-gray-50 p-3 rounded text-xs max-h-32 overflow-y-auto">
+                        <!-- Data Guru -->
+                        <div class="border rounded-lg p-4">
+                            <h4 class="font-semibold text-blue-600 mb-2">👨‍🏫 Data Guru (${teachersData.length} records)</h4>
+                            <div class="bg-gray-50 p-3 rounded text-xs max-h-32 overflow-y-auto font-mono">
                                 ${teachersData.length > 0 ? 
                                     teachersData.slice(0, 5).map(t => 
                                         `NIP: ${t.NIP || 'N/A'} | Nama: ${t.Nama || 'N/A'} | Mapel: ${t['Mata Pelajaran'] || 'N/A'}`
                                     ).join('<br>') + (teachersData.length > 5 ? '<br>... dan ' + (teachersData.length - 5) + ' lainnya' : '')
-                                    : 'Tidak ada data guru yang dimuat'
+                                    : '<span class="text-red-600">❌ Tidak ada data guru yang dimuat</span>'
                                 }
                             </div>
                         </div>
 
-                        <div>
-                            <h4 class="font-semibold text-blue-600">📚 Data Materi (${materialsData.length} records):</h4>
-                            <div class="bg-gray-50 p-3 rounded text-xs max-h-32 overflow-y-auto">
+                        <!-- Data Materi -->
+                        <div class="border rounded-lg p-4">
+                            <h4 class="font-semibold text-blue-600 mb-2">📚 Data Materi Pembelajaran (${materialsData.length} records)</h4>
+                            <div class="bg-gray-50 p-3 rounded text-xs max-h-32 overflow-y-auto font-mono">
                                 ${materialsData.length > 0 ? 
                                     materialsData.slice(0, 3).map(m => 
-                                        `ID: ${m.ID || 'N/A'} | Judul: ${m.Judul || 'N/A'} | Kelas: ${m.Kelas || 'N/A'}`
+                                        `ID: ${m.ID || 'N/A'} | Judul: ${m.Judul || 'N/A'} | Mapel: ${m['Mata Pelajaran'] || 'N/A'} | Kelas: ${m.Kelas || 'N/A'}`
                                     ).join('<br>') + (materialsData.length > 3 ? '<br>... dan ' + (materialsData.length - 3) + ' lainnya' : '')
-                                    : 'Tidak ada data materi yang dimuat'
+                                    : '<span class="text-red-600">❌ Tidak ada data materi yang dimuat</span>'
                                 }
                             </div>
                         </div>
 
-                        <div class="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded">
-                            <p class="text-sm text-yellow-800">
-                                <strong>💡 Tips:</strong> Jika data kosong, pastikan Google Sheets sudah diatur "Anyone with link can view" 
-                                dan nama sheet sesuai: DataSiswa, DataGuru, MateriPelajaran, LKPD
-                            </p>
+                        <!-- Data LKPD -->
+                        <div class="border rounded-lg p-4">
+                            <h4 class="font-semibold text-blue-600 mb-2">📝 Data LKPD (${lkpdData.length} records)</h4>
+                            <div class="bg-gray-50 p-3 rounded text-xs max-h-32 overflow-y-auto font-mono">
+                                ${lkpdData.length > 0 ? 
+                                    lkpdData.slice(0, 3).map(l => 
+                                        `ID: ${l.ID || 'N/A'} | Judul: ${l.Judul || 'N/A'} | Mapel: ${l['Mata Pelajaran'] || 'N/A'} | Kelas: ${l.Kelas || 'N/A'}`
+                                    ).join('<br>') + (lkpdData.length > 3 ? '<br>... dan ' + (lkpdData.length - 3) + ' lainnya' : '')
+                                    : '<span class="text-red-600">❌ Tidak ada data LKPD yang dimuat</span>'
+                                }
+                            </div>
+                        </div>
+
+                        <!-- URL Testing -->
+                        <div class="border rounded-lg p-4">
+                            <h4 class="font-semibold text-blue-600 mb-2">🔗 URL Google Sheets yang Digunakan</h4>
+                            <div class="bg-gray-50 p-3 rounded text-xs">
+                                <p class="mb-2"><strong>Sheet ID:</strong> ${SHEET_CONFIG.SHEET_ID}</p>
+                                <p class="mb-2"><strong>Base URL:</strong></p>
+                                <p class="font-mono text-blue-600 break-all">
+                                    https://docs.google.com/spreadsheets/d/${SHEET_CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&sheet=[NAMA_SHEET]
+                                </p>
+                            </div>
+                        </div>
+
+                        <!-- Troubleshooting -->
+                        <div class="border border-yellow-300 rounded-lg p-4 bg-yellow-50">
+                            <h4 class="font-semibold text-yellow-800 mb-2">🛠️ Panduan Troubleshooting</h4>
+                            <div class="text-sm text-yellow-800 space-y-2">
+                                <div><strong>Jika semua data kosong:</strong></div>
+                                <ul class="list-disc list-inside ml-4 space-y-1">
+                                    <li>Pastikan Google Sheets diatur sebagai "Anyone with link can view"</li>
+                                    <li>Cek nama sheet harus persis: DataSiswa, DataGuru, MateriPelajaran, LKPD</li>
+                                    <li>Pastikan baris pertama berisi header kolom</li>
+                                    <li>Pastikan tidak ada baris kosong di awal data</li>
+                                </ul>
+                                
+                                <div class="mt-3"><strong>Format kolom yang diperlukan:</strong></div>
+                                <ul class="list-disc list-inside ml-4 space-y-1 text-xs">
+                                    <li><strong>DataSiswa:</strong> NISN, Nama, Kelas</li>
+                                    <li><strong>DataGuru:</strong> NIP, Nama, Mata Pelajaran</li>
+                                    <li><strong>MateriPelajaran:</strong> ID, Judul, Deskripsi, Mata Pelajaran, Kelas, Tipe, Link</li>
+                                    <li><strong>LKPD:</strong> ID, Judul, Deskripsi, Mata Pelajaran, Kelas, Link</li>
+                                </ul>
+                            </div>
+                        </div>
+
+                        <!-- Refresh Button -->
+                        <div class="text-center">
+                            <button onclick="this.closest('.fixed').remove(); loadAllData();" 
+                                    class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors">
+                                🔄 Refresh Data Sekarang
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -860,5 +1038,5 @@
             activeTab.classList.remove('text-gray-500', 'hover:text-gray-700');
         }
     </script>
- <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'98efd43b225291b4',t:'MTc2MDUzNjY4My4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'98efe17287fa9d0c',t:'MTc2MDUzNzIyNC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
