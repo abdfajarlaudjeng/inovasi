@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sistem Pembelajaran Interaktif SMP</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50">
+
+  <div id="login-screen" class="min-h-screen flex items-center justify-center">
+    <div class="bg-white p-8 rounded-xl shadow-lg w-full max-w-md">
+      <h1 class="text-2xl font-bold text-center text-blue-600 mb-6">Portal Pembelajaran</h1>
+      <form id="login-form" class="space-y-4">
+        <select id="userType" required class="w-full border rounded-lg p-2">
+          <option value="">Pilih Jenis Pengguna</option>
+          <option value="student">Siswa</option>
+          <option value="teacher">Guru</option>
+        </select>
+        <input id="identifier" type="text" required placeholder="Masukkan NISN (siswa) atau NIP (guru)" class="w-full border rounded-lg p-2" />
+        <button type="submit" class="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700">Masuk</button>
+      </form>
+      <p id="login-message" class="text-center text-red-600 mt-4"></p>
+    </div>
+  </div>
+
+  <div id="dashboard" class="hidden min-h-screen">
+    <header class="bg-blue-600 text-white py-4">
+      <div class="container mx-auto px-4 flex justify-between">
+        <div>
+          <h2 id="user-name" class="font-bold"></h2>
+          <p id="user-role" class="text-sm text-blue-100"></p>
+        </div>
+        <button id="logout" class="bg-blue-500 hover:bg-blue-400 px-4 py-2 rounded-lg">Logout</button>
+      </div>
+    </header>
+
+    <main class="container mx-auto px-4 py-8">
+      <section>
+        <h3 class="text-xl font-bold mb-4">📝 LKPD Tersedia</h3>
+        <div id="lkpd-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const SHEET_ID = "12damNTphrDElg1qsmAWVKoTrfXhDXKa8l660vhTNR8I"; // Spreadsheet ID
+    const DATA_GURU = "DataGuru";
+    const DATA_LKPD = "LKPD";
+
+    let teachersData = [];
+    let lkpdData = [];
+    let currentUser = null;
+
+    async function fetchSheet(sheetName) {
+      const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${sheetName}`;
+      const res = await fetch(url);
+      const text = await res.text();
+      const json = JSON.parse(text.substring(47).slice(0, -2));
+      const rows = json.table.rows;
+      const cols = json.table.cols.map(c => c.label);
+      return rows.map(r => {
+        const obj = {};
+        cols.forEach((c, i) => obj[c] = r.c[i]?.v || "");
+        return obj;
+      });
+    }
+
+    async function loadData() {
+      teachersData = await fetchSheet(DATA_GURU);
+      lkpdData = await fetchSheet(DATA_LKPD);
+      console.log("✅ DataGuru:", teachersData.length, "✅ LKPD:", lkpdData.length);
+    }
+
+    function normalize(str) {
+      return (str || "").toString().replace(/\s|\.|-/g, "").toLowerCase();
+    }
+
+    function showDashboard(user) {
+      document.getElementById("login-screen").classList.add("hidden");
+      document.getElementById("dashboard").classList.remove("hidden");
+      document.getElementById("user-name").textContent = user.Nama;
+      document.getElementById("user-role").textContent = user.type === "teacher"
+        ? `Guru ${user["Mata Pelajaran"]}`
+        : `Siswa ${user.Kelas}`;
+      renderLKPD();
+    }
+
+    function renderLKPD() {
+      const container = document.getElementById("lkpd-container");
+      container.innerHTML = "";
+      if (lkpdData.length === 0) {
+        container.innerHTML = `<p class="text-gray-600">Tidak ada LKPD ditemukan.</p>`;
+        return;
+      }
+
+      lkpdData.forEach(lkpd => {
+        const link = (lkpd.Link || "").trim();
+        const isValid = /^https?:\/\//i.test(link);
+        const normalized = isValid ? link : `https://${link}`;
+        const card = document.createElement("div");
+        card.className = "bg-white rounded-lg shadow p-4 hover:shadow-lg transition";
+        card.innerHTML = `
+          <h4 class="font-semibold text-gray-800 mb-2">${lkpd.Judul}</h4>
+          <p class="text-sm text-gray-600 mb-2">${lkpd.Deskripsi}</p>
+          <p class="text-xs text-gray-500 mb-4">${lkpd["Mata Pelajaran"]} • Kelas ${lkpd.Kelas}</p>
+          <a href="${normalized}" target="_blank"
+             class="block text-center py-2 rounded-lg ${isValid ? 'bg-orange-600 text-white hover:bg-orange-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}">
+             ${isValid ? 'Kerjakan LKPD' : 'Link Tidak Tersedia'}
+          </a>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    async function handleLogin(event) {
+      event.preventDefault();
+      const type = document.getElementById("userType").value;
+      const id = document.getElementById("identifier").value.trim();
+      const msg = document.getElementById("login-message");
+      msg.textContent = "";
+
+      if (type === "teacher") {
+        const match = teachersData.find(t => normalize(t.NIP) === normalize(id));
+        if (match) {
+          currentUser = { ...match, type: "teacher" };
+          showDashboard(currentUser);
+        } else {
+          msg.textContent = "NIP tidak ditemukan. Pastikan data guru sudah benar.";
+        }
+      } else if (type === "student") {
+        msg.textContent = "Login siswa belum diaktifkan pada versi ini.";
+      } else {
+        msg.textContent = "Pilih jenis pengguna terlebih dahulu.";
+      }
+    }
+
+    document.getElementById("login-form").addEventListener("submit", handleLogin);
+    document.getElementById("logout").addEventListener("click", () => location.reload());
+
+    loadData();
+  </script>
+</body>
+</html>
