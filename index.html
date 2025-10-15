@@ -95,9 +95,9 @@
         // Sheet column mappings untuk memastikan kompatibilitas
         const SHEET_COLUMNS = {
             DataSiswa: ['NISN', 'Nama', 'Kelas'],
-            DataGuru: ['NIP', 'Nama', 'Mata Pelajaran'],
+            DataGuru: ['NIP', 'Nama', 'Mata Pelajaran', 'Email'],
             MateriPelajaran: ['ID', 'Judul', 'Deskripsi', 'Mata Pelajaran', 'Kelas', 'Tipe', 'Link'],
-            LKPD: ['ID', 'Judul', 'Deskripsi', 'Mata Pelajaran', 'Kelas', 'Link'],
+            LKPD: ['ID', 'Judul', 'Mata Pelajaran', 'Kelas', 'Link', 'Deskripsi'],
             ProgressSiswa: ['NISN', 'Nama', 'Kelas', 'Mata Pelajaran', 'Materi/LKPD', 'Jenis', 'Waktu']
         };
 
@@ -494,9 +494,11 @@
                 } else if (userType === 'teacher') {
                     console.log(`👨‍🏫 Data guru tersedia:`, teachersData.length, 'records');
                     console.log(`📋 Sample data guru:`, teachersData.slice(0, 3));
+                    console.log(`🔍 Struktur kolom guru:`, teachersData.length > 0 ? Object.keys(teachersData[0]) : 'Tidak ada data');
                     
-                    // Cari dengan berbagai kemungkinan field name dan format
+                    // Cari dengan berbagai kemungkinan field name dan format - sesuai dengan kolom yang disebutkan
                     user = teachersData.find(t => {
+                        // Sesuai dengan kolom: NIP, Nama, Mata Pelajaran, Email
                         const nip = t.NIP || t.nip || t.Nip || t['NIP'] || '';
                         const result = nip && nip.toString().trim() === identifier.toString().trim();
                         console.log(`🔍 Checking teacher NIP: "${nip}" vs "${identifier}" = ${result}`);
@@ -507,9 +509,20 @@
                         user.type = 'teacher';
                         user.id = user.NIP || user.nip || user.Nip || user['NIP'];
                         user.name = user.Nama || user.nama || user.Name || user['Nama'];
-                        user.subject = user['Mata Pelajaran'] || user['mata_pelajaran'] || user.MataPelajaran || user.Subject || user.subject;
-                        console.log(`✅ Guru ditemukan:`, user);
+                        // Sesuai dengan nama kolom yang disebutkan: "Mata Pelajaran"
+                        user.subject = user['Mata Pelajaran'] || user['mata_pelajaran'] || user.MataPelajaran || user.Subject || user.subject || '';
+                        user.email = user.Email || user.email || user['Email'] || '';
+                        console.log(`✅ Guru ditemukan:`, {
+                            id: user.id,
+                            name: user.name,
+                            subject: user.subject,
+                            email: user.email
+                        });
                     } else {
+                        // Debug: tampilkan semua NIP yang tersedia
+                        const availableNIPs = teachersData.map(t => t.NIP || t.nip || t.Nip || t['NIP']).filter(Boolean);
+                        console.log(`❌ NIP tidak ditemukan. Available NIPs:`, availableNIPs);
+                        
                         // Cek apakah ada data guru yang mirip
                         const similarTeachers = teachersData.filter(t => {
                             const nip = t.NIP || t.nip || t.Nip || t['NIP'] || '';
@@ -523,18 +536,16 @@
                                 t.NIP || t.nip || t.Nip || t['NIP']
                             ).join(', ');
                             errorMessage = `NIP "${identifier}" tidak ditemukan. Mungkin maksud Anda: ${suggestions}`;
+                        } else if (availableNIPs.length > 0) {
+                            const suggestions = availableNIPs.slice(0, 3).join(', ');
+                            errorMessage = `NIP "${identifier}" tidak terdaftar. Contoh NIP yang tersedia: ${suggestions}`;
                         } else {
-                            errorMessage = `NIP "${identifier}" tidak terdaftar. Pastikan NIP sudah benar dan terdaftar di Google Sheets.`;
+                            errorMessage = `NIP "${identifier}" tidak terdaftar. Pastikan NIP sudah benar dan terdaftar di Google Sheets dengan kolom NIP, Nama, Mata Pelajaran, Email.`;
                         }
-                        
-                        // Debug info untuk troubleshooting
-                        console.log(`❌ NIP tidak ditemukan. Available NIPs:`, 
-                            teachersData.map(t => t.NIP || t.nip || t.Nip || t['NIP']).filter(Boolean)
-                        );
                         
                         // Tampilkan struktur data guru untuk debugging
                         if (teachersData.length > 0) {
-                            console.log(`🔍 Struktur data guru pertama:`, Object.keys(teachersData[0]));
+                            console.log(`🔍 Struktur data guru pertama:`, teachersData[0]);
                         }
                     }
                 }
@@ -622,8 +633,10 @@
                             <div class="bg-gray-50 p-3 rounded text-xs max-h-32 overflow-y-auto font-mono">
                                 ${teachersData.length > 0 ? 
                                     teachersData.slice(0, 5).map(t => 
-                                        `NIP: ${t.NIP || 'N/A'} | Nama: ${t.Nama || 'N/A'} | Mapel: ${t['Mata Pelajaran'] || 'N/A'}`
-                                    ).join('<br>') + (teachersData.length > 5 ? '<br>... dan ' + (teachersData.length - 5) + ' lainnya' : '')
+                                        `NIP: ${t.NIP || 'N/A'} | Nama: ${t.Nama || 'N/A'} | Mapel: ${t['Mata Pelajaran'] || 'N/A'} | Email: ${t.Email || 'N/A'}`
+                                    ).join('<br>') + (teachersData.length > 5 ? '<br>... dan ' + (teachersData.length - 5) + ' lainnya' : '') +
+                                    '<br><br><strong>🔍 Struktur kolom guru:</strong><br>' + 
+                                    (teachersData.length > 0 ? Object.keys(teachersData[0]).join(', ') : 'Tidak ada data')
                                     : '<span class="text-red-600">❌ Tidak ada data guru yang dimuat</span>'
                                 }
                             </div>
@@ -688,9 +701,9 @@
                                 <div class="mt-3"><strong>Format kolom yang diperlukan:</strong></div>
                                 <ul class="list-disc list-inside ml-4 space-y-1 text-xs">
                                     <li><strong>DataSiswa:</strong> NISN, Nama, Kelas</li>
-                                    <li><strong>DataGuru:</strong> NIP, Nama, Mata Pelajaran</li>
+                                    <li><strong>DataGuru:</strong> NIP, Nama, Mata Pelajaran, Email</li>
                                     <li><strong>MateriPelajaran:</strong> ID, Judul, Deskripsi, Mata Pelajaran, Kelas, Tipe, Link</li>
-                                    <li><strong>LKPD:</strong> ID, Judul, Deskripsi, Mata Pelajaran, Kelas, Link</li>
+                                    <li><strong>LKPD:</strong> ID, Judul, Mata Pelajaran, Kelas, Link, Deskripsi</li>
                                 </ul>
                             </div>
                         </div>
@@ -837,18 +850,27 @@
             }
 
             lkpdList.forEach((lkpd, index) => {
-                // Handle berbagai kemungkinan field names
+                // Sesuai dengan struktur kolom yang disebutkan: ID, Judul, Mata Pelajaran, Kelas, Link, Deskripsi
                 const id = lkpd.ID || lkpd.id || lkpd.Id || lkpd['ID'] || `lkpd-${index}`;
                 const judul = lkpd.Judul || lkpd.judul || lkpd.Title || lkpd.title || lkpd['Judul'] || 'LKPD Tanpa Judul';
-                const deskripsi = lkpd.Deskripsi || lkpd.deskripsi || lkpd.Description || lkpd.description || lkpd['Deskripsi'] || 'Tidak ada deskripsi';
-                const mataPelajaran = lkpd['Mata Pelajaran'] || lkpd['mata_pelajaran'] || lkpd.MataPelajaran || lkpd.Subject || lkpd.subject || lkpd['Mata Pelajaran'] || 'Umum';
+                const mataPelajaran = lkpd['Mata Pelajaran'] || lkpd['mata_pelajaran'] || lkpd.MataPelajaran || lkpd.Subject || lkpd.subject || 'Umum';
                 const kelas = lkpd.Kelas || lkpd.kelas || lkpd.Class || lkpd.class || lkpd['Kelas'] || '-';
                 const link = lkpd.Link || lkpd.link || lkpd.URL || lkpd.url || lkpd['Link'] || '#';
+                const deskripsi = lkpd.Deskripsi || lkpd.deskripsi || lkpd.Description || lkpd.description || lkpd['Deskripsi'] || 'Tidak ada deskripsi';
 
                 console.log(`📝 LKPD ${index + 1}:`, {
-                    id, judul, deskripsi, mataPelajaran, kelas, link,
-                    originalData: lkpd
+                    id, judul, mataPelajaran, kelas, link, deskripsi,
+                    originalData: lkpd,
+                    availableKeys: Object.keys(lkpd)
                 });
+
+                // Validasi data penting
+                if (!judul || judul === 'LKPD Tanpa Judul') {
+                    console.warn(`⚠️ LKPD ${index + 1} tidak memiliki judul yang valid`);
+                }
+                if (!link || link === '#') {
+                    console.warn(`⚠️ LKPD ${index + 1} tidak memiliki link yang valid`);
+                }
 
                 const card = document.createElement('div');
                 card.className = 'bg-white rounded-lg shadow-md p-6 card-hover fade-in';
@@ -865,8 +887,8 @@
                         <div class="ml-4">📝</div>
                     </div>
                     <button onclick="accessLKPD('${id}', '${judul.replace(/'/g, "\\'")}', '${link}', '${mataPelajaran.replace(/'/g, "\\'")}')" 
-                            class="w-full bg-orange-600 text-white py-2 px-4 rounded-lg hover:bg-orange-700 transition-colors">
-                        Kerjakan LKPD
+                            class="w-full bg-orange-600 text-white py-2 px-4 rounded-lg hover:bg-orange-700 transition-colors ${link === '#' ? 'opacity-50 cursor-not-allowed' : ''}">
+                        ${link === '#' ? 'Link Tidak Tersedia' : 'Kerjakan LKPD'}
                     </button>
                 `;
                 container.appendChild(card);
@@ -1221,5 +1243,5 @@
             activeTab.classList.remove('text-gray-500', 'hover:text-gray-700');
         }
     </script>
- <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'98efef2a050e55de',t:'MTc2MDUzNzc4Ni4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'98effb27341f3d86',t:'MTc2MDUzODI3Ny4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
