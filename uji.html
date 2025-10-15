@@ -505,55 +505,163 @@
                     // Cari dengan berbagai kemungkinan field name dan format - sesuai dengan kolom yang disebutkan
                     user = teachersData.find(t => {
                         // Sesuai dengan kolom: NIP, Nama, Mata Pelajaran, Email
-                        const nip = (t.NIP || t.nip || t.Nip || t['NIP'] || '').toString().trim();
+                        // Coba berbagai variasi nama kolom
+                        const nipFields = ['NIP', 'nip', 'Nip', 'NIP ', ' NIP', 'NIP.', '.NIP'];
+                        let nip = '';
+                        
+                        // Cari field NIP yang ada
+                        for (const field of nipFields) {
+                            if (t[field] !== undefined && t[field] !== null && t[field] !== '') {
+                                nip = t[field].toString().trim();
+                                break;
+                            }
+                        }
+                        
+                        // Jika tidak ada field NIP yang jelas, coba cari di semua field
+                        if (!nip) {
+                            const allKeys = Object.keys(t);
+                            for (const key of allKeys) {
+                                if (key.toLowerCase().includes('nip') && t[key] && t[key].toString().trim() !== '') {
+                                    nip = t[key].toString().trim();
+                                    console.log(`🔍 Found NIP in field "${key}": ${nip}`);
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if (!nip) {
+                            console.log(`⚠️ No NIP found for teacher:`, t);
+                            return false;
+                        }
+                        
                         const inputNip = identifier.toString().trim();
                         
-                        // Normalisasi NIP - hapus spasi dan karakter khusus
-                        const normalizedNip = nip.replace(/[\s\-\.]/g, '');
-                        const normalizedInput = inputNip.replace(/[\s\-\.]/g, '');
+                        // Normalisasi NIP - hapus spasi, titik, dan tanda hubung
+                        const normalizedNip = nip.replace(/[\s\-\.\,]/g, '');
+                        const normalizedInput = inputNip.replace(/[\s\-\.\,]/g, '');
                         
-                        const result = normalizedNip && (
-                            normalizedNip === normalizedInput ||
-                            nip === inputNip ||
-                            nip.includes(inputNip) ||
-                            inputNip.includes(nip)
-                        );
+                        // Multiple matching strategies
+                        const exactMatch = normalizedNip === normalizedInput;
+                        const originalMatch = nip === inputNip;
+                        const containsMatch = normalizedNip.includes(normalizedInput) && normalizedInput.length >= 3;
+                        const reverseContainsMatch = normalizedInput.includes(normalizedNip) && normalizedNip.length >= 3;
                         
-                        console.log(`🔍 Checking teacher NIP: "${nip}" (normalized: "${normalizedNip}") vs "${inputNip}" (normalized: "${normalizedInput}") = ${result}`);
+                        const result = exactMatch || originalMatch || containsMatch || reverseContainsMatch;
+                        
+                        console.log(`🔍 Checking teacher NIP: "${nip}" (normalized: "${normalizedNip}") vs "${inputNip}" (normalized: "${normalizedInput}")`, {
+                            exactMatch,
+                            originalMatch,
+                            containsMatch,
+                            reverseContainsMatch,
+                            finalResult: result
+                        });
+                        
                         return result;
                     });
                     
                     if (user) {
                         user.type = 'teacher';
-                        user.id = user.NIP || user.nip || user.Nip || user['NIP'];
-                        user.name = user.Nama || user.nama || user.Name || user['Nama'];
-                        // Sesuai dengan nama kolom yang disebutkan: "Mata Pelajaran"
-                        user.subject = user['Mata Pelajaran'] || user['mata_pelajaran'] || user.MataPelajaran || user.Subject || user.subject || '';
-                        user.email = user.Email || user.email || user['Email'] || '';
+                        
+                        // Cari NIP dengan berbagai variasi
+                        const nipFields = ['NIP', 'nip', 'Nip', 'NIP ', ' NIP', 'NIP.', '.NIP'];
+                        for (const field of nipFields) {
+                            if (user[field] !== undefined && user[field] !== null && user[field] !== '') {
+                                user.id = user[field].toString().trim();
+                                break;
+                            }
+                        }
+                        
+                        // Cari Nama dengan berbagai variasi
+                        const namaFields = ['Nama', 'nama', 'Name', 'name', 'Nama ', ' Nama'];
+                        for (const field of namaFields) {
+                            if (user[field] !== undefined && user[field] !== null && user[field] !== '') {
+                                user.name = user[field].toString().trim();
+                                break;
+                            }
+                        }
+                        
+                        // Cari Mata Pelajaran dengan berbagai variasi
+                        const mapelFields = ['Mata Pelajaran', 'mata_pelajaran', 'MataPelajaran', 'Subject', 'subject', 'Mapel', 'mapel'];
+                        for (const field of mapelFields) {
+                            if (user[field] !== undefined && user[field] !== null && user[field] !== '') {
+                                user.subject = user[field].toString().trim();
+                                break;
+                            }
+                        }
+                        
+                        // Cari Email dengan berbagai variasi
+                        const emailFields = ['Email', 'email', 'EMAIL', 'Email ', ' Email'];
+                        for (const field of emailFields) {
+                            if (user[field] !== undefined && user[field] !== null && user[field] !== '') {
+                                user.email = user[field].toString().trim();
+                                break;
+                            }
+                        }
+                        
+                        // Set default values jika tidak ditemukan
+                        user.id = user.id || 'N/A';
+                        user.name = user.name || 'Guru';
+                        user.subject = user.subject || 'Umum';
+                        user.email = user.email || '';
+                        
                         console.log(`✅ Guru ditemukan:`, {
                             id: user.id,
                             name: user.name,
                             subject: user.subject,
-                            email: user.email
+                            email: user.email,
+                            originalData: user
                         });
                     } else {
-                        // Debug: tampilkan semua NIP yang tersedia
-                        const availableNIPs = teachersData.map(t => t.NIP || t.nip || t.Nip || t['NIP']).filter(Boolean);
+                        // Debug: tampilkan semua NIP yang tersedia dengan berbagai field
+                        const availableNIPs = [];
+                        teachersData.forEach((t, index) => {
+                            const nipFields = ['NIP', 'nip', 'Nip', 'NIP ', ' NIP', 'NIP.', '.NIP'];
+                            let foundNip = '';
+                            
+                            for (const field of nipFields) {
+                                if (t[field] !== undefined && t[field] !== null && t[field] !== '') {
+                                    foundNip = t[field].toString().trim();
+                                    break;
+                                }
+                            }
+                            
+                            if (!foundNip) {
+                                // Cari di semua field yang mengandung 'nip'
+                                const allKeys = Object.keys(t);
+                                for (const key of allKeys) {
+                                    if (key.toLowerCase().includes('nip') && t[key] && t[key].toString().trim() !== '') {
+                                        foundNip = t[key].toString().trim();
+                                        break;
+                                    }
+                                }
+                            }
+                            
+                            if (foundNip) {
+                                availableNIPs.push(foundNip);
+                            } else {
+                                console.warn(`⚠️ Teacher ${index + 1} tidak memiliki NIP yang valid:`, t);
+                            }
+                        });
+                        
                         console.log(`❌ NIP tidak ditemukan. Available NIPs:`, availableNIPs);
                         
                         // Cek apakah ada data guru yang mirip
                         const similarTeachers = teachersData.filter(t => {
-                            const nip = t.NIP || t.nip || t.Nip || t['NIP'] || '';
-                            return nip && nip.toString().includes(identifier);
+                            const allValues = Object.values(t).join(' ').toLowerCase();
+                            return allValues.includes(identifier.toLowerCase());
                         });
                         
-                        console.log(`🔍 Guru dengan NIP mirip:`, similarTeachers);
+                        console.log(`🔍 Guru dengan data mirip:`, similarTeachers);
                         
                         if (similarTeachers.length > 0) {
-                            const suggestions = similarTeachers.slice(0, 3).map(t => 
-                                t.NIP || t.nip || t.Nip || t['NIP']
-                            ).join(', ');
-                            errorMessage = `NIP "${identifier}" tidak ditemukan. Mungkin maksud Anda: ${suggestions}`;
+                            const suggestions = similarTeachers.slice(0, 3).map(t => {
+                                const nipFields = ['NIP', 'nip', 'Nip'];
+                                for (const field of nipFields) {
+                                    if (t[field]) return t[field];
+                                }
+                                return 'NIP tidak ditemukan';
+                            }).join(', ');
+                            errorMessage = `NIP "${identifier}" tidak ditemukan. Data mirip ditemukan: ${suggestions}`;
                         } else if (availableNIPs.length > 0) {
                             const suggestions = availableNIPs.slice(0, 3).join(', ');
                             errorMessage = `NIP "${identifier}" tidak terdaftar. Contoh NIP yang tersedia: ${suggestions}`;
@@ -564,6 +672,7 @@
                         // Tampilkan struktur data guru untuk debugging
                         if (teachersData.length > 0) {
                             console.log(`🔍 Struktur data guru pertama:`, teachersData[0]);
+                            console.log(`🔍 Semua field yang tersedia:`, Object.keys(teachersData[0]));
                         }
                     }
                 }
@@ -884,7 +993,7 @@
                 const judul = lkpd.Judul || lkpd.judul || lkpd.Title || lkpd.title || lkpd['Judul'] || 'LKPD Tanpa Judul';
                 const mataPelajaran = lkpd['Mata Pelajaran'] || lkpd['mata_pelajaran'] || lkpd.MataPelajaran || lkpd.Subject || lkpd.subject || 'Umum';
                 const kelas = lkpd.Kelas || lkpd.kelas || lkpd.Class || lkpd.class || lkpd['Kelas'] || '-';
-                const link = lkpd.Link || lkpd.link || lkpd.URL || lkpd.url || lkpd['Link'] || '#';
+                const link = lkpd.Link || lkpd.link || lkpd.URL || lkpd.url || lkpd['Link'] || '';
                 const deskripsi = lkpd.Deskripsi || lkpd.deskripsi || lkpd.Description || lkpd.description || lkpd['Deskripsi'] || 'Tidak ada deskripsi';
 
                 console.log(`📝 LKPD ${index + 1}:`, {
@@ -893,18 +1002,38 @@
                     availableKeys: Object.keys(lkpd)
                 });
 
-                // Validasi data penting
-                if (!judul || judul === 'LKPD Tanpa Judul') {
-                    console.warn(`⚠️ LKPD ${index + 1} tidak memiliki judul yang valid`);
-                }
-                if (!link || link === '#') {
-                    console.warn(`⚠️ LKPD ${index + 1} tidak memiliki link yang valid`);
+                // Validasi dan normalisasi link dengan lebih fleksibel
+                let isValidLink = false;
+                let normalizedLink = '';
+                
+                if (link && link.trim() !== '' && link !== '#') {
+                    const trimmedLink = link.trim();
+                    
+                    // Cek berbagai format link
+                    if (trimmedLink.startsWith('http://') || trimmedLink.startsWith('https://')) {
+                        normalizedLink = trimmedLink;
+                        isValidLink = true;
+                    } else if (trimmedLink.startsWith('www.')) {
+                        normalizedLink = 'https://' + trimmedLink;
+                        isValidLink = true;
+                    } else if (trimmedLink.includes('.') && !trimmedLink.includes(' ')) {
+                        // Kemungkinan domain tanpa protokol
+                        normalizedLink = 'https://' + trimmedLink;
+                        isValidLink = true;
+                    } else if (trimmedLink.startsWith('//')) {
+                        normalizedLink = 'https:' + trimmedLink;
+                        isValidLink = true;
+                    }
                 }
 
-                // Validasi dan normalisasi link
-                const isValidLink = link && link !== '#' && link.trim() !== '' && 
-                                  (link.startsWith('http://') || link.startsWith('https://') || link.startsWith('www.'));
-                const normalizedLink = isValidLink ? (link.startsWith('www.') ? 'https://' + link : link) : '#';
+                console.log(`🔗 Link validation for LKPD ${index + 1}:`, {
+                    original: link,
+                    normalized: normalizedLink,
+                    isValid: isValidLink
+                });
+
+                // Create unique button ID untuk menghindari konflik
+                const buttonId = `lkpd-btn-${index}`;
 
                 const card = document.createElement('div');
                 card.className = 'bg-white rounded-lg shadow-md p-6 card-hover fade-in';
@@ -913,21 +1042,35 @@
                         <div class="flex-1">
                             <h3 class="text-lg font-semibold text-gray-800 mb-2">${judul}</h3>
                             <p class="text-sm text-gray-600 mb-2">${deskripsi}</p>
-                            <div class="flex items-center space-x-4 text-sm text-gray-500">
+                            <div class="flex items-center space-x-2 text-sm text-gray-500 flex-wrap gap-2">
                                 <span class="bg-orange-100 text-orange-800 px-2 py-1 rounded">${mataPelajaran}</span>
                                 <span class="bg-green-100 text-green-800 px-2 py-1 rounded">Kelas ${kelas}</span>
-                                ${isValidLink ? '<span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">✓ Link Tersedia</span>' : '<span class="bg-red-100 text-red-800 px-2 py-1 rounded text-xs">✗ No Link</span>'}
+                                ${isValidLink ? 
+                                    '<span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">✓ Link Tersedia</span>' : 
+                                    '<span class="bg-red-100 text-red-800 px-2 py-1 rounded text-xs">✗ No Link</span>'
+                                }
                             </div>
+                            ${!isValidLink && link ? `<p class="text-xs text-red-500 mt-2">Link asli: ${link}</p>` : ''}
                         </div>
                         <div class="ml-4">📝</div>
                     </div>
-                    <button onclick="accessLKPD('${id}', '${judul.replace(/'/g, "\\'")}', '${normalizedLink}', '${mataPelajaran.replace(/'/g, "\\'")}')" 
+                    <button id="${buttonId}" 
                             class="w-full py-2 px-4 rounded-lg transition-colors font-medium ${isValidLink ? 'bg-orange-600 text-white hover:bg-orange-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}"
                             ${!isValidLink ? 'disabled' : ''}>
                         ${isValidLink ? 'Kerjakan LKPD' : 'Link Tidak Tersedia'}
                     </button>
                 `;
                 container.appendChild(card);
+
+                // Add event listener setelah element ditambahkan ke DOM
+                if (isValidLink) {
+                    const button = document.getElementById(buttonId);
+                    if (button) {
+                        button.addEventListener('click', function() {
+                            accessLKPD(id, judul, normalizedLink, mataPelajaran);
+                        });
+                    }
+                }
             });
         }
 
@@ -1297,5 +1440,5 @@
             activeTab.classList.remove('text-gray-500', 'hover:text-gray-700');
         }
     </script>
- <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'98f00231d1663d86',t:'MTc2MDUzODU2NS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'98f00d8364f73d86',t:'MTc2MDUzOTAyOS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
