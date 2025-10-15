@@ -7,7 +7,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-50">
-  <!-- LOGIN SCREEN -->
+  <!-- LOGIN -->
   <div id="login-screen" class="min-h-screen flex items-center justify-center">
     <div class="bg-white p-8 rounded-xl shadow-lg w-full max-w-md">
       <h1 class="text-2xl font-bold text-center text-blue-600 mb-6">Portal Pembelajaran</h1>
@@ -40,6 +40,7 @@
       <nav class="flex space-x-2 mb-6">
         <button id="tab-materi" class="tab-btn bg-blue-600 text-white px-4 py-2 rounded-lg">Materi</button>
         <button id="tab-lkpd" class="tab-btn bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300">LKPD</button>
+        <button id="tab-rekap" class="tab-btn hidden bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300">Rekap</button>
       </nav>
 
       <section id="materi-section">
@@ -51,11 +52,18 @@
         <h3 class="text-xl font-bold mb-4">📝 Lembar Kerja (LKPD)</h3>
         <div id="lkpd-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
       </section>
+
+      <section id="rekap-section" class="hidden">
+        <h3 class="text-xl font-bold mb-4">📊 Rekap Progres Siswa</h3>
+        <div id="rekap-container" class="bg-white rounded-lg p-4 shadow"></div>
+      </section>
     </main>
   </div>
 
   <script>
-    const SHEET_ID = "12damNTphrDElg1qsmAWVKoTrfXhDXKa8l660vhTNR8I"; 
+    const SHEET_ID = "12damNTphrDElg1qsmAWVKoTrfXhDXKa8l660vhTNR8I";
+    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzmhMhn6QD_51GUSm_f-wWJJ_JbxWMua1TXsJhA5MlvO5CeJXzehslDjTl-msZpQtYTPA/exec"; // ⬅️ ganti nanti
+
     const SHEETS = {
       siswa: "DataSiswa",
       guru: "DataGuru",
@@ -63,10 +71,7 @@
       lkpd: "LKPD"
     };
 
-    let siswaData = [];
-    let guruData = [];
-    let materiData = [];
-    let lkpdData = [];
+    let siswaData = [], guruData = [], materiData = [], lkpdData = [];
     let currentUser = null;
 
     async function fetchSheet(sheet) {
@@ -89,12 +94,6 @@
         fetchSheet(SHEETS.materi),
         fetchSheet(SHEETS.lkpd)
       ]);
-      console.log("✅ Data Loaded:", {
-        siswa: siswaData.length,
-        guru: guruData.length,
-        materi: materiData.length,
-        lkpd: lkpdData.length
-      });
     }
 
     function normalize(str) {
@@ -107,139 +106,119 @@
       document.getElementById("user-name").textContent = user.Nama;
       document.getElementById("user-role").textContent =
         user.type === "teacher" ? `Guru ${user["Mata Pelajaran"]}` : `Siswa Kelas ${user.Kelas}`;
+
+      document.getElementById("tab-rekap").classList.toggle("hidden", user.type !== "teacher");
+
       if (user.type === "teacher") {
-        renderMateriForGuru(user);
-        renderLKPDForGuru(user);
+        renderMateri(materiData.filter(m => m["Mata Pelajaran"] === user["Mata Pelajaran"]));
+        renderLKPD(lkpdData.filter(l => l["Mata Pelajaran"] === user["Mata Pelajaran"]));
       } else {
-        renderMateriForSiswa(user);
-        renderLKPDForSiswa(user);
+        renderMateri(materiData.filter(m => m.Kelas == user.Kelas));
+        renderLKPD(lkpdData.filter(l => l.Kelas == user.Kelas));
       }
-    }
-
-    function renderMateriForGuru(user) {
-      const mapel = user["Mata Pelajaran"];
-      const materi = materiData.filter(m => m["Mata Pelajaran"] === mapel);
-      renderMateri(materi);
-    }
-
-    function renderMateriForSiswa(user) {
-      const kelas = user.Kelas.toString().trim();
-      const materi = materiData.filter(m => m.Kelas.toString().trim() === kelas);
-      renderMateri(materi);
     }
 
     function renderMateri(data) {
-      const container = document.getElementById("materi-container");
-      container.innerHTML = "";
-      if (data.length === 0) {
-        container.innerHTML = `<p class="text-gray-600">Belum ada materi.</p>`;
-        return;
-      }
+      const c = document.getElementById("materi-container");
+      c.innerHTML = data.length ? "" : `<p class='text-gray-600'>Belum ada materi.</p>`;
       data.forEach(m => {
         const link = (m.Link || "").trim();
-        const isValid = /^https?:\/\//i.test(link);
-        const normalized = isValid ? link : `https://${link}`;
-        const card = document.createElement("div");
-        card.className = "bg-white p-4 rounded-lg shadow hover:shadow-lg";
-        card.innerHTML = `
-          <h4 class="font-semibold mb-1">${m.Judul}</h4>
-          <p class="text-sm text-gray-600 mb-2">${m.Deskripsi}</p>
-          <p class="text-xs text-gray-500 mb-3">${m["Mata Pelajaran"]} • Kelas ${m.Kelas}</p>
-          <a href="${normalized}" target="_blank"
-             class="block text-center py-2 rounded-lg ${isValid ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-gray-300 text-gray-500'}">
-             ${isValid ? 'Buka Materi' : 'Link Tidak Tersedia'}
-          </a>
-        `;
-        container.appendChild(card);
+        const valid = /^https?:\/\//i.test(link);
+        const normalized = valid ? link : `https://${link}`;
+        c.innerHTML += `
+          <div class='bg-white p-4 rounded-lg shadow'>
+            <h4 class='font-semibold mb-1'>${m.Judul}</h4>
+            <p class='text-sm text-gray-600 mb-2'>${m.Deskripsi}</p>
+            <p class='text-xs text-gray-500 mb-3'>${m["Mata Pelajaran"]} • Kelas ${m.Kelas}</p>
+            <a href='${normalized}' target='_blank' class='block text-center py-2 rounded-lg ${valid ? "bg-blue-600 text-white hover:bg-blue-700" : "bg-gray-300 text-gray-500"}'>${valid ? "Buka Materi" : "Link Tidak Tersedia"}</a>
+          </div>`;
       });
-    }
-
-    function renderLKPDForGuru(user) {
-      const mapel = user["Mata Pelajaran"];
-      const data = lkpdData.filter(l => l["Mata Pelajaran"] === mapel);
-      renderLKPD(data);
-    }
-
-    function renderLKPDForSiswa(user) {
-      const kelas = user.Kelas.toString().trim();
-      const data = lkpdData.filter(l => l.Kelas.toString().trim() === kelas);
-      renderLKPD(data);
     }
 
     function renderLKPD(data) {
-      const container = document.getElementById("lkpd-container");
-      container.innerHTML = "";
-      if (data.length === 0) {
-        container.innerHTML = `<p class="text-gray-600">Belum ada LKPD.</p>`;
-        return;
-      }
+      const c = document.getElementById("lkpd-container");
+      c.innerHTML = data.length ? "" : `<p class='text-gray-600'>Belum ada LKPD.</p>`;
       data.forEach(l => {
         const link = (l.Link || "").trim();
-        const isValid = /^https?:\/\//i.test(link);
-        const normalized = isValid ? link : `https://${link}`;
-        const card = document.createElement("div");
-        card.className = "bg-white p-4 rounded-lg shadow hover:shadow-lg";
-        card.innerHTML = `
-          <h4 class="font-semibold mb-1">${l.Judul}</h4>
-          <p class="text-sm text-gray-600 mb-2">${l.Deskripsi}</p>
-          <p class="text-xs text-gray-500 mb-3">${l["Mata Pelajaran"]} • Kelas ${l.Kelas}</p>
-          <a href="${normalized}" target="_blank"
-             class="block text-center py-2 rounded-lg ${isValid ? 'bg-orange-600 text-white hover:bg-orange-700' : 'bg-gray-300 text-gray-500'}">
-             ${isValid ? 'Kerjakan LKPD' : 'Link Tidak Tersedia'}
-          </a>
-        `;
-        container.appendChild(card);
+        const valid = /^https?:\/\//i.test(link);
+        const normalized = valid ? link : `https://${link}`;
+        c.innerHTML += `
+          <div class='bg-white p-4 rounded-lg shadow'>
+            <h4 class='font-semibold mb-1'>${l.Judul}</h4>
+            <p class='text-sm text-gray-600 mb-2'>${l.Deskripsi}</p>
+            <p class='text-xs text-gray-500 mb-3'>${l["Mata Pelajaran"]} • Kelas ${l.Kelas}</p>
+            <a href='${normalized}' target='_blank' onclick='logProgress("${l.Judul}")' class='block text-center py-2 rounded-lg ${valid ? "bg-orange-600 text-white hover:bg-orange-700" : "bg-gray-300 text-gray-500"}'>${valid ? "Kerjakan LKPD" : "Link Tidak Tersedia"}</a>
+          </div>`;
       });
     }
 
-    async function handleLogin(event) {
-      event.preventDefault();
+    async function logProgress(judul) {
+      if (!currentUser || currentUser.type !== "student") return;
+      await fetch(SCRIPT_URL, {
+        method: "POST",
+        body: JSON.stringify({
+          action: "log",
+          nisn: currentUser.NISN,
+          nama: currentUser.Nama,
+          kelas: currentUser.Kelas,
+          lkpd: judul
+        }),
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    async function showRekap() {
+      const res = await fetch(`${SCRIPT_URL}?action=getRekap`);
+      const data = await res.json();
+      const c = document.getElementById("rekap-container");
+      if (!data.length) {
+        c.innerHTML = `<p class="text-gray-600">Belum ada progres siswa.</p>`;
+        return;
+      }
+      c.innerHTML = `
+        <table class="min-w-full border">
+          <thead class="bg-blue-100">
+            <tr><th class="p-2 border">Tanggal</th><th class="p-2 border">Nama</th><th class="p-2 border">Kelas</th><th class="p-2 border">LKPD</th></tr>
+          </thead>
+          <tbody>
+            ${data.map(d => `<tr><td class='border p-2'>${d.Tanggal}</td><td class='border p-2'>${d.Nama}</td><td class='border p-2'>${d.Kelas}</td><td class='border p-2'>${d.LKPD}</td></tr>`).join("")}
+          </tbody>
+        </table>`;
+    }
+
+    async function handleLogin(e) {
+      e.preventDefault();
       const type = document.getElementById("userType").value;
       const id = document.getElementById("identifier").value.trim();
       const msg = document.getElementById("login-message");
       msg.textContent = "";
 
-      if (!type || !id) {
-        msg.textContent = "Isi semua data dengan benar.";
-        return;
-      }
-
       if (type === "teacher") {
         const user = guruData.find(g => normalize(g.NIP) === normalize(id));
-        if (user) {
-          currentUser = { ...user, type: "teacher" };
-          showDashboard(currentUser);
-        } else {
-          msg.textContent = "NIP tidak ditemukan.";
-        }
+        if (user) { currentUser = { ...user, type: "teacher" }; showDashboard(currentUser); }
+        else msg.textContent = "NIP tidak ditemukan.";
       } else {
         const user = siswaData.find(s => normalize(s.NISN) === normalize(id));
-        if (user) {
-          currentUser = { ...user, type: "student" };
-          showDashboard(currentUser);
-        } else {
-          msg.textContent = "NISN tidak ditemukan.";
-        }
+        if (user) { currentUser = { ...user, type: "student" }; showDashboard(currentUser); }
+        else msg.textContent = "NISN tidak ditemukan.";
       }
     }
 
-    // TAB HANDLER
-    document.getElementById("tab-materi").addEventListener("click", () => {
-      document.getElementById("materi-section").classList.remove("hidden");
-      document.getElementById("lkpd-section").classList.add("hidden");
-      document.getElementById("tab-materi").classList.add("bg-blue-600", "text-white");
-      document.getElementById("tab-lkpd").classList.remove("bg-blue-600", "text-white");
-    });
-
-    document.getElementById("tab-lkpd").addEventListener("click", () => {
-      document.getElementById("materi-section").classList.add("hidden");
-      document.getElementById("lkpd-section").classList.remove("hidden");
-      document.getElementById("tab-lkpd").classList.add("bg-blue-600", "text-white");
-      document.getElementById("tab-materi").classList.remove("bg-blue-600", "text-white");
-    });
-
-    document.getElementById("logout").addEventListener("click", () => location.reload());
     document.getElementById("login-form").addEventListener("submit", handleLogin);
+    document.getElementById("logout").addEventListener("click", () => location.reload());
+    document.getElementById("tab-materi").addEventListener("click", () => {
+      ["materi", "lkpd", "rekap"].forEach(s => document.getElementById(`${s}-section`).classList.add("hidden"));
+      document.getElementById("materi-section").classList.remove("hidden");
+    });
+    document.getElementById("tab-lkpd").addEventListener("click", () => {
+      ["materi", "lkpd", "rekap"].forEach(s => document.getElementById(`${s}-section`).classList.add("hidden"));
+      document.getElementById("lkpd-section").classList.remove("hidden");
+    });
+    document.getElementById("tab-rekap").addEventListener("click", () => {
+      ["materi", "lkpd", "rekap"].forEach(s => document.getElementById(`${s}-section`).classList.add("hidden"));
+      document.getElementById("rekap-section").classList.remove("hidden");
+      showRekap();
+    });
 
     loadData();
   </script>
