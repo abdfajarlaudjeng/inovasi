@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Sistem Pembelajaran Interaktif SMP</title>
+  <title>Portal Pembelajaran SMP</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-50">
-
+  <!-- LOGIN SCREEN -->
   <div id="login-screen" class="min-h-screen flex items-center justify-center">
     <div class="bg-white p-8 rounded-xl shadow-lg w-full max-w-md">
       <h1 class="text-2xl font-bold text-center text-blue-600 mb-6">Portal Pembelajaran</h1>
@@ -24,6 +24,7 @@
     </div>
   </div>
 
+  <!-- DASHBOARD -->
   <div id="dashboard" class="hidden min-h-screen">
     <header class="bg-blue-600 text-white py-4">
       <div class="container mx-auto px-4 flex justify-between">
@@ -36,30 +37,45 @@
     </header>
 
     <main class="container mx-auto px-4 py-8">
-      <section>
-        <h3 class="text-xl font-bold mb-4">📝 LKPD Tersedia</h3>
+      <nav class="flex space-x-2 mb-6">
+        <button id="tab-materi" class="tab-btn bg-blue-600 text-white px-4 py-2 rounded-lg">Materi</button>
+        <button id="tab-lkpd" class="tab-btn bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300">LKPD</button>
+      </nav>
+
+      <section id="materi-section">
+        <h3 class="text-xl font-bold mb-4">📘 Materi Pembelajaran</h3>
+        <div id="materi-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+      </section>
+
+      <section id="lkpd-section" class="hidden">
+        <h3 class="text-xl font-bold mb-4">📝 Lembar Kerja (LKPD)</h3>
         <div id="lkpd-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
       </section>
     </main>
   </div>
 
   <script>
-    const SHEET_ID = "12damNTphrDElg1qsmAWVKoTrfXhDXKa8l660vhTNR8I"; // Spreadsheet ID
-    const DATA_GURU = "DataGuru";
-    const DATA_LKPD = "LKPD";
+    const SHEET_ID = "12damNTphrDElg1qsmAWVKoTrfXhDXKa8l660vhTNR8I"; 
+    const SHEETS = {
+      siswa: "DataSiswa",
+      guru: "DataGuru",
+      materi: "MateriPelajaran",
+      lkpd: "LKPD"
+    };
 
-    let teachersData = [];
+    let siswaData = [];
+    let guruData = [];
+    let materiData = [];
     let lkpdData = [];
     let currentUser = null;
 
-    async function fetchSheet(sheetName) {
-      const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${sheetName}`;
+    async function fetchSheet(sheet) {
+      const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${sheet}`;
       const res = await fetch(url);
       const text = await res.text();
-      const json = JSON.parse(text.substring(47).slice(0, -2));
-      const rows = json.table.rows;
+      const json = JSON.parse(text.substr(47).slice(0, -2));
       const cols = json.table.cols.map(c => c.label);
-      return rows.map(r => {
+      return json.table.rows.map(r => {
         const obj = {};
         cols.forEach((c, i) => obj[c] = r.c[i]?.v || "");
         return obj;
@@ -67,9 +83,18 @@
     }
 
     async function loadData() {
-      teachersData = await fetchSheet(DATA_GURU);
-      lkpdData = await fetchSheet(DATA_LKPD);
-      console.log("✅ DataGuru:", teachersData.length, "✅ LKPD:", lkpdData.length);
+      [siswaData, guruData, materiData, lkpdData] = await Promise.all([
+        fetchSheet(SHEETS.siswa),
+        fetchSheet(SHEETS.guru),
+        fetchSheet(SHEETS.materi),
+        fetchSheet(SHEETS.lkpd)
+      ]);
+      console.log("✅ Data Loaded:", {
+        siswa: siswaData.length,
+        guru: guruData.length,
+        materi: materiData.length,
+        lkpd: lkpdData.length
+      });
     }
 
     function normalize(str) {
@@ -80,32 +105,86 @@
       document.getElementById("login-screen").classList.add("hidden");
       document.getElementById("dashboard").classList.remove("hidden");
       document.getElementById("user-name").textContent = user.Nama;
-      document.getElementById("user-role").textContent = user.type === "teacher"
-        ? `Guru ${user["Mata Pelajaran"]}`
-        : `Siswa ${user.Kelas}`;
-      renderLKPD();
+      document.getElementById("user-role").textContent =
+        user.type === "teacher" ? `Guru ${user["Mata Pelajaran"]}` : `Siswa Kelas ${user.Kelas}`;
+      if (user.type === "teacher") {
+        renderMateriForGuru(user);
+        renderLKPDForGuru(user);
+      } else {
+        renderMateriForSiswa(user);
+        renderLKPDForSiswa(user);
+      }
     }
 
-    function renderLKPD() {
-      const container = document.getElementById("lkpd-container");
+    function renderMateriForGuru(user) {
+      const mapel = user["Mata Pelajaran"];
+      const materi = materiData.filter(m => m["Mata Pelajaran"] === mapel);
+      renderMateri(materi);
+    }
+
+    function renderMateriForSiswa(user) {
+      const kelas = user.Kelas.toString().trim();
+      const materi = materiData.filter(m => m.Kelas.toString().trim() === kelas);
+      renderMateri(materi);
+    }
+
+    function renderMateri(data) {
+      const container = document.getElementById("materi-container");
       container.innerHTML = "";
-      if (lkpdData.length === 0) {
-        container.innerHTML = `<p class="text-gray-600">Tidak ada LKPD ditemukan.</p>`;
+      if (data.length === 0) {
+        container.innerHTML = `<p class="text-gray-600">Belum ada materi.</p>`;
         return;
       }
-
-      lkpdData.forEach(lkpd => {
-        const link = (lkpd.Link || "").trim();
+      data.forEach(m => {
+        const link = (m.Link || "").trim();
         const isValid = /^https?:\/\//i.test(link);
         const normalized = isValid ? link : `https://${link}`;
         const card = document.createElement("div");
-        card.className = "bg-white rounded-lg shadow p-4 hover:shadow-lg transition";
+        card.className = "bg-white p-4 rounded-lg shadow hover:shadow-lg";
         card.innerHTML = `
-          <h4 class="font-semibold text-gray-800 mb-2">${lkpd.Judul}</h4>
-          <p class="text-sm text-gray-600 mb-2">${lkpd.Deskripsi}</p>
-          <p class="text-xs text-gray-500 mb-4">${lkpd["Mata Pelajaran"]} • Kelas ${lkpd.Kelas}</p>
+          <h4 class="font-semibold mb-1">${m.Judul}</h4>
+          <p class="text-sm text-gray-600 mb-2">${m.Deskripsi}</p>
+          <p class="text-xs text-gray-500 mb-3">${m["Mata Pelajaran"]} • Kelas ${m.Kelas}</p>
           <a href="${normalized}" target="_blank"
-             class="block text-center py-2 rounded-lg ${isValid ? 'bg-orange-600 text-white hover:bg-orange-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}">
+             class="block text-center py-2 rounded-lg ${isValid ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-gray-300 text-gray-500'}">
+             ${isValid ? 'Buka Materi' : 'Link Tidak Tersedia'}
+          </a>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    function renderLKPDForGuru(user) {
+      const mapel = user["Mata Pelajaran"];
+      const data = lkpdData.filter(l => l["Mata Pelajaran"] === mapel);
+      renderLKPD(data);
+    }
+
+    function renderLKPDForSiswa(user) {
+      const kelas = user.Kelas.toString().trim();
+      const data = lkpdData.filter(l => l.Kelas.toString().trim() === kelas);
+      renderLKPD(data);
+    }
+
+    function renderLKPD(data) {
+      const container = document.getElementById("lkpd-container");
+      container.innerHTML = "";
+      if (data.length === 0) {
+        container.innerHTML = `<p class="text-gray-600">Belum ada LKPD.</p>`;
+        return;
+      }
+      data.forEach(l => {
+        const link = (l.Link || "").trim();
+        const isValid = /^https?:\/\//i.test(link);
+        const normalized = isValid ? link : `https://${link}`;
+        const card = document.createElement("div");
+        card.className = "bg-white p-4 rounded-lg shadow hover:shadow-lg";
+        card.innerHTML = `
+          <h4 class="font-semibold mb-1">${l.Judul}</h4>
+          <p class="text-sm text-gray-600 mb-2">${l.Deskripsi}</p>
+          <p class="text-xs text-gray-500 mb-3">${l["Mata Pelajaran"]} • Kelas ${l.Kelas}</p>
+          <a href="${normalized}" target="_blank"
+             class="block text-center py-2 rounded-lg ${isValid ? 'bg-orange-600 text-white hover:bg-orange-700' : 'bg-gray-300 text-gray-500'}">
              ${isValid ? 'Kerjakan LKPD' : 'Link Tidak Tersedia'}
           </a>
         `;
@@ -120,23 +199,47 @@
       const msg = document.getElementById("login-message");
       msg.textContent = "";
 
+      if (!type || !id) {
+        msg.textContent = "Isi semua data dengan benar.";
+        return;
+      }
+
       if (type === "teacher") {
-        const match = teachersData.find(t => normalize(t.NIP) === normalize(id));
-        if (match) {
-          currentUser = { ...match, type: "teacher" };
+        const user = guruData.find(g => normalize(g.NIP) === normalize(id));
+        if (user) {
+          currentUser = { ...user, type: "teacher" };
           showDashboard(currentUser);
         } else {
-          msg.textContent = "NIP tidak ditemukan. Pastikan data guru sudah benar.";
+          msg.textContent = "NIP tidak ditemukan.";
         }
-      } else if (type === "student") {
-        msg.textContent = "Login siswa belum diaktifkan pada versi ini.";
       } else {
-        msg.textContent = "Pilih jenis pengguna terlebih dahulu.";
+        const user = siswaData.find(s => normalize(s.NISN) === normalize(id));
+        if (user) {
+          currentUser = { ...user, type: "student" };
+          showDashboard(currentUser);
+        } else {
+          msg.textContent = "NISN tidak ditemukan.";
+        }
       }
     }
 
-    document.getElementById("login-form").addEventListener("submit", handleLogin);
+    // TAB HANDLER
+    document.getElementById("tab-materi").addEventListener("click", () => {
+      document.getElementById("materi-section").classList.remove("hidden");
+      document.getElementById("lkpd-section").classList.add("hidden");
+      document.getElementById("tab-materi").classList.add("bg-blue-600", "text-white");
+      document.getElementById("tab-lkpd").classList.remove("bg-blue-600", "text-white");
+    });
+
+    document.getElementById("tab-lkpd").addEventListener("click", () => {
+      document.getElementById("materi-section").classList.add("hidden");
+      document.getElementById("lkpd-section").classList.remove("hidden");
+      document.getElementById("tab-lkpd").classList.add("bg-blue-600", "text-white");
+      document.getElementById("tab-materi").classList.remove("bg-blue-600", "text-white");
+    });
+
     document.getElementById("logout").addEventListener("click", () => location.reload());
+    document.getElementById("login-form").addEventListener("submit", handleLogin);
 
     loadData();
   </script>
