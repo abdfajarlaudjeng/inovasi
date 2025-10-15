@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -11,7 +10,7 @@
   <!-- LOGIN -->
   <div id="login-screen" class="min-h-screen flex items-center justify-center">
     <div class="bg-white p-8 rounded-xl shadow-lg w-full max-w-md">
-      <h1 class="text-2xl font-bold text-center text-blue-600 mb-6">Portal Pembelajaran</h1>
+      <h1 class="text-2xl font-bold text-center text-blue-600 mb-6">Portal Pembelajaran SMPN 10 Banawa Selatan</h1>
       <form id="login-form" class="space-y-4">
         <select id="userType" required class="w-full border rounded-lg p-2">
           <option value="">Pilih Jenis Pengguna</option>
@@ -63,7 +62,7 @@
 
   <script>
     const SHEET_ID = "12damNTphrDElg1qsmAWVKoTrfXhDXKa8l660vhTNR8I";
-    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzmhMhn6QD_51GUSm_f-wWJJ_JbxWMua1TXsJhA5MlvO5CeJXzehslDjTl-msZpQtYTPA/exec"; // ⬅️ ganti nanti
+    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyfD_qxc1EmWjvZtGyL4J3sWhd32nFKj50XG6AqdC3gvLxQHC4eqVxIQuxb7cKP04hgPw/exec"; // Ganti nanti
 
     const SHEETS = {
       siswa: "DataSiswa",
@@ -95,6 +94,7 @@
         fetchSheet(SHEETS.materi),
         fetchSheet(SHEETS.lkpd)
       ]);
+      console.log("✅ Loaded:", { siswaData, guruData, materiData, lkpdData });
     }
 
     function normalize(str) {
@@ -107,7 +107,6 @@
       document.getElementById("user-name").textContent = user.Nama;
       document.getElementById("user-role").textContent =
         user.type === "teacher" ? `Guru ${user["Mata Pelajaran"]}` : `Siswa Kelas ${user.Kelas}`;
-
       document.getElementById("tab-rekap").classList.toggle("hidden", user.type !== "teacher");
 
       if (user.type === "teacher") {
@@ -130,7 +129,7 @@
           <div class='bg-white p-4 rounded-lg shadow'>
             <h4 class='font-semibold mb-1'>${m.Judul}</h4>
             <p class='text-sm text-gray-600 mb-2'>${m.Deskripsi}</p>
-            <p class='text-xs text-gray-500 mb-3'>${m["Mata Pelajaran"]} • Kelas ${m.Kelas}</p>
+            <p class='text-xs text-gray-500 mb-3'>${m["Mata Pelajaran"]} • Kelas ${m.Kelas} • ${m.Tipe}</p>
             <a href='${normalized}' target='_blank' class='block text-center py-2 rounded-lg ${valid ? "bg-blue-600 text-white hover:bg-blue-700" : "bg-gray-300 text-gray-500"}'>${valid ? "Buka Materi" : "Link Tidak Tersedia"}</a>
           </div>`;
       });
@@ -177,7 +176,7 @@
         return;
       }
       c.innerHTML = `
-        <table class="min-w-full border">
+        <table class="min-w-full border text-sm">
           <thead class="bg-blue-100">
             <tr><th class="p-2 border">Tanggal</th><th class="p-2 border">Nama</th><th class="p-2 border">Kelas</th><th class="p-2 border">LKPD</th></tr>
           </thead>
@@ -198,10 +197,12 @@
         const user = guruData.find(g => normalize(g.NIP) === normalize(id));
         if (user) { currentUser = { ...user, type: "teacher" }; showDashboard(currentUser); }
         else msg.textContent = "NIP tidak ditemukan.";
-      } else {
+      } else if (type === "student") {
         const user = siswaData.find(s => normalize(s.NISN) === normalize(id));
         if (user) { currentUser = { ...user, type: "student" }; showDashboard(currentUser); }
         else msg.textContent = "NISN tidak ditemukan.";
+      } else {
+        msg.textContent = "Pilih jenis pengguna terlebih dahulu.";
       }
     }
 
