@@ -1,0 +1,1387 @@
+<!doctype html>
+<html lang="id" class="h-full">
+ <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistem Pembelajaran Interaktif SMP</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/_sdk/element_sdk.js"></script>
+  <script src="/_sdk/data_sdk.js"></script>
+  <style>
+        body {
+            box-sizing: border-box;
+        }
+        .loading-spinner {
+            border: 3px solid #f3f4f6;
+            border-top: 3px solid #3b82f6;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .card-hover {
+            transition: all 0.3s ease;
+        }
+        .card-hover:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+        .progress-bar {
+            transition: width 0.5s ease;
+        }
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            padding: 12px 20px;
+            border-radius: 8px;
+            color: white;
+            font-weight: 500;
+            transform: translateX(400px);
+            transition: transform 0.3s ease;
+        }
+        .notification.show {
+            transform: translateX(0);
+        }
+        .notification.success {
+            background-color: #10b981;
+        }
+        .notification.error {
+            background-color: #ef4444;
+        }
+        .modal-overlay {
+            background-color: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(4px);
+        }
+    </style>
+ </head>
+ <body class="h-full bg-gray-50">
+  <script>
+        // Configuration
+        const defaultConfig = {
+            school_name: "SMP Negeri 1 Indonesia",
+            school_vision: "Mewujudkan Generasi Cerdas, Berkarakter, dan Berdaya Saing Global",
+            welcome_message: "Selamat datang di portal pembelajaran digital yang inovatif",
+            footer_message: "Merdeka Belajar - Indonesia Maju 2045",
+            primary_color: "#3b82f6",
+            secondary_color: "#10b981",
+            accent_color: "#f59e0b",
+            text_color: "#1f2937",
+            background_color: "#f9fafb"
+        };
+
+        // Google Sheets Configuration
+        const SHEET_CONFIG = {
+            SHEET_ID: '12damNTphrDElg1qsmAWVKoTrfXhDXKa8l660vhTNR8I', // ID Google Sheets Anda
+            STUDENTS_SHEET: 'DataSiswa',
+            TEACHERS_SHEET: 'DataGuru',
+            MATERIALS_SHEET: 'MateriPelajaran',
+            LKPD_SHEET: 'LKPD',
+            PROGRESS_SHEET: 'ProgressSiswa'
+        };
+
+        // Sheet column mappings untuk memastikan kompatibilitas
+        const SHEET_COLUMNS = {
+            DataSiswa: ['NISN', 'Nama', 'Kelas'],
+            DataGuru: ['NIP', 'Nama', 'Mata Pelajaran', 'Email'],
+            MateriPelajaran: ['ID', 'Judul', 'Deskripsi', 'Mata Pelajaran', 'Kelas', 'Tipe', 'Link'],
+            LKPD: ['ID', 'Judul', 'Mata Pelajaran', 'Kelas', 'Link', 'Deskripsi'],
+            ProgressSiswa: ['NISN', 'Nama', 'Kelas', 'Mata Pelajaran', 'Materi/LKPD', 'Jenis', 'Waktu']
+        };
+
+        // Global State
+        let currentUser = null;
+        let studentsData = [];
+        let teachersData = [];
+        let materialsData = [];
+        let lkpdData = [];
+        let progressData = [];
+        let isLoading = false;
+        let currentRecordCount = 0;
+
+        // Data SDK Handler
+        const dataHandler = {
+            onDataChanged(data) {
+                progressData = data;
+                currentRecordCount = data.length;
+                updateProgressDisplay();
+            }
+        };
+
+        // Utility Functions
+        function showNotification(message, type = 'success') {
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.textContent = message;
+            document.body.appendChild(notification);
+            
+            setTimeout(() => notification.classList.add('show'), 100);
+            setTimeout(() => {
+                notification.classList.remove('show');
+                setTimeout(() => document.body.removeChild(notification), 300);
+            }, 3000);
+        }
+
+        function showLoading(show = true) {
+            isLoading = show;
+            const loadingElements = document.querySelectorAll('.loading-indicator');
+            loadingElements.forEach(el => {
+                el.style.display = show ? 'flex' : 'none';
+            });
+        }
+
+        // Escape HTML to avoid injecting raw HTML into the DOM
+        function escapeHtml(unsafe) {
+            if (unsafe === undefined || unsafe === null) return '';
+            return String(unsafe)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
+        async function fetchGoogleSheetData(sheetName) {
+            try {
+                console.log(`🔄 Memulai fetch untuk sheet: ${sheetName}`);
+                
+                // Coba beberapa format URL yang berbeda dengan encoding yang tepat
+                const encodedSheetName = encodeURIComponent(sheetName);
+                const urls = [
+                    `https://docs.google.com/spreadsheets/d/${SHEET_CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodedSheetName}`,
+                    `https://docs.google.com/spreadsheets/d/${SHEET_CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&sheet=${sheetName}`,
+                    `https://docs.google.com/spreadsheets/d/${SHEET_CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&headers=1&sheet=${encodedSheetName}`,
+                    `https://docs.google.com/spreadsheets/d/${SHEET_CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&headers=1&sheet=${sheetName}`,
+                    // Tambahan untuk sheet dengan nama khusus
+                    `https://docs.google.com/spreadsheets/d/${SHEET_CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&gid=0&range=${sheetName}!A:Z`,
+                    `https://docs.google.com/spreadsheets/d/${SHEET_CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&range=${sheetName}!A1:Z1000`
+                ];
+
+                let lastError = null;
+                let attemptCount = 0;
+                
+                for (const url of urls) {
+                    attemptCount++;
+                    try {
+                        console.log(`📡 Percobaan ${attemptCount}: ${url}`);
+                        
+                        const response = await fetch(url, {
+                            method: 'GET',
+                            headers: {
+                                'Accept': 'application/json, text/plain, */*',
+                                'Cache-Control': 'no-cache'
+                            }
+                        });
+                        
+                        if (!response.ok) {
+                            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                        }
+                        
+                        const text = await response.text();
+                        console.log(`📄 Response length untuk ${sheetName}:`, text.length);
+                        
+                        if (text.length < 50) {
+                            throw new Error('Response terlalu pendek, kemungkinan sheet tidak ditemukan');
+                        }
+                        
+                        // Handle different response formats dengan lebih robust
+                        let jsonText = text;
+                        
+                        // Format 1: /*O_o*/\ngoogle.visualization.Query.setResponse(...)
+                        if (text.startsWith('/*O_o*/\ngoogle.visualization.Query.setResponse(')) {
+                            jsonText = text.substring(47, text.length - 2);
+                        }
+                        // Format 2: google.visualization.Query.setResponse(...)
+                        else if (text.includes('google.visualization.Query.setResponse(')) {
+                            const start = text.indexOf('google.visualization.Query.setResponse(') + 39;
+                            const end = text.lastIndexOf(');');
+                            if (end > start) {
+                                jsonText = text.substring(start, end);
+                            }
+                        }
+                        // Format 3: Direct JSON
+                        else if (text.trim().startsWith('{')) {
+                            jsonText = text;
+                        }
+                        
+                        const json = JSON.parse(jsonText);
+                        console.log(`🔍 Parsed JSON structure untuk ${sheetName}:`, {
+                            hasTable: !!json.table,
+                            hasRows: !!(json.table && json.table.rows),
+                            rowCount: json.table && json.table.rows ? json.table.rows.length : 0,
+                            hasColumns: !!(json.table && json.table.cols),
+                            colCount: json.table && json.table.cols ? json.table.cols.length : 0
+                        });
+                        
+                        // Cek apakah ada error dalam response
+                        if (json.status === 'error') {
+                            throw new Error(`Google Sheets API Error: ${json.errors?.[0]?.detailed_message || 'Unknown error'}`);
+                        }
+                        
+                        if (!json.table) {
+                            throw new Error('Tidak ada data table dalam response');
+                        }
+                        
+                        if (!json.table.rows || json.table.rows.length === 0) {
+                            console.warn(`⚠️ Sheet ${sheetName} kosong atau tidak ada data`);
+                            // Jangan langsung continue, return empty array untuk sheet kosong
+                            return [];
+                        }
+                        
+                        if (!json.table.cols || json.table.cols.length === 0) {
+                            throw new Error('Tidak ada kolom yang ditemukan');
+                        }
+                        
+                        const headers = json.table.cols.map((col, idx) => {
+                            // beberapa kolom tidak punya label -> fallback ke id atau index
+                            return (col.label && col.label.toString().trim()) || (col.id && col.id.toString().trim()) || `Column_${idx}`;
+                        });
+                        
+                        console.log(`📋 Headers untuk ${sheetName}:`, headers);
+                        
+                        const data = json.table.rows.map((row, rowIndex) => {
+                            const obj = {};
+                            headers.forEach((header, colIndex) => {
+                                const cell = row.c && row.c[colIndex];
+                                let value = '';
+                                
+                                if (cell) {
+                                    // Prioritas: formatted value, lalu value, lalu empty string
+                                    value = cell.f !== undefined && cell.f !== null ? cell.f : (cell.v !== undefined && cell.v !== null ? cell.v : '');
+                                    
+                                    // Convert to string dan trim
+                                    if (value !== null && value !== undefined) {
+                                        value = value.toString().trim();
+                                    }
+                                }
+                                
+                                obj[header] = value;
+                            });
+                            return obj;
+                        }).filter((row, index) => {
+                            // Filter out completely empty rows
+                            const hasData = Object.values(row).some(value => 
+                                value && value.toString().trim() !== ''
+                            );
+                            
+                            if (!hasData) {
+                                console.log(`🗑️ Filtering out empty row ${index} in ${sheetName}`);
+                            }
+                            
+                            return hasData;
+                        });
+                        
+                        console.log(`✅ Berhasil memuat ${sheetName}: ${data.length} records`);
+                        console.log(`📊 Sample data untuk ${sheetName}:`, data.slice(0, 2));
+                        
+                        return data;
+                        
+                    } catch (error) {
+                        lastError = error;
+                        console.warn(`❌ Percobaan ${attemptCount} gagal untuk ${sheetName}:`, error.message);
+                        
+                        // Jika ini percobaan terakhir, log detail error
+                        if (attemptCount === urls.length) {
+                            console.error(`🚨 Semua percobaan gagal untuk ${sheetName}:`, error);
+                        }
+                        continue;
+                    }
+                }
+                
+                throw lastError || new Error(`Semua ${urls.length} percobaan URL gagal untuk sheet ${sheetName}`);
+                
+            } catch (error) {
+                console.error(`💥 Fatal error fetching ${sheetName}:`, error);
+                showNotification(`Gagal memuat ${sheetName}: ${error.message}`, 'error');
+                return [];
+            }
+        }
+
+        async function loadAllData() {
+            showLoading(true);
+            try {
+                const [students, teachers, materials, lkpd] = await Promise.all([
+                    fetchGoogleSheetData(SHEET_CONFIG.STUDENTS_SHEET),
+                    fetchGoogleSheetData(SHEET_CONFIG.TEACHERS_SHEET),
+                    fetchGoogleSheetData(SHEET_CONFIG.MATERIALS_SHEET),
+                    fetchGoogleSheetData(SHEET_CONFIG.LKPD_SHEET)
+                ]);
+                
+                studentsData = students;
+                teachersData = teachers;
+                materialsData = materials;
+                lkpdData = lkpd;
+
+                console.log('✅ Data Loaded:', {
+                  siswa: studentsData.length,
+                  guru: teachersData.length,
+                  materi: materialsData.length,
+                  lkpd: lkpdData.length
+                });
+                
+                showNotification('Data berhasil dimuat dari Google Sheets');
+            } catch (error) {
+                showNotification('Gagal memuat data dari Google Sheets', 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        async function saveProgress(progressData) {
+            if (currentRecordCount >= 999) {
+                showNotification('Batas maksimum 999 record tercapai. Hubungi administrator.', 'error');
+                return;
+            }
+
+            showLoading(true);
+            try {
+                // Simpan ke Data SDK (Canva Sheet internal)
+                const result = await window.dataSdk.create({
+                    student_id: progressData.student_id,
+                    student_name: progressData.student_name,
+                    class_grade: progressData.class_grade,
+                    subject: progressData.subject,
+                    material_id: progressData.material_id,
+                    material_title: progressData.material_title,
+                    progress_type: progressData.progress_type,
+                    progress_value: progressData.progress_value,
+                    session_duration: progressData.session_duration || 0,
+                    timestamp: new Date().toISOString()
+                });
+
+                if (result.isOk) {
+                    // Juga coba kirim ke Google Sheets ProgressSiswa (opsional)
+                    await saveToGoogleSheetProgress(progressData);
+                    showNotification('Progress berhasil disimpan');
+                } else {
+                    showNotification('Gagal menyimpan progress', 'error');
+                }
+            } catch (error) {
+                showNotification('Error menyimpan progress', 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        async function saveToGoogleSheetProgress(progressData) {
+            try {
+                // Format data untuk Google Sheets
+                const timestamp = new Date().toLocaleString('id-ID', {
+                    timeZone: 'Asia/Jakarta',
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                });
+
+                const jenisAktivitas = progressData.progress_type === 'material_access' ? 'Akses Materi' : 'Mengerjakan LKPD';
+                
+                // Buat URL untuk Google Apps Script (jika tersedia)
+                // Ini adalah contoh implementasi - perlu Google Apps Script di sisi server
+                const formData = new FormData();
+                formData.append('nisn', progressData.student_id);
+                formData.append('nama', progressData.student_name);
+                formData.append('kelas', progressData.class_grade);
+                formData.append('mataPelajaran', progressData.subject);
+                formData.append('materiLKPD', progressData.material_title);
+                formData.append('jenis', jenisAktivitas);
+                formData.append('waktu', timestamp);
+
+                // Catatan: URL ini perlu diganti dengan Google Apps Script yang sebenarnya
+                // const scriptUrl = 'https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec';
+                // const response = await fetch(scriptUrl, {
+                //     method: 'POST',
+                //     body: formData
+                // });
+
+                console.log('📝 Data progress yang akan disimpan ke Google Sheets:', {
+                    NISN: progressData.student_id,
+                    Nama: progressData.student_name,
+                    Kelas: progressData.class_grade,
+                    'Mata Pelajaran': progressData.subject,
+                    'Materi/LKPD': progressData.material_title,
+                    Jenis: jenisAktivitas,
+                    Waktu: timestamp
+                });
+
+            } catch (error) {
+                console.warn('Gagal menyimpan ke Google Sheets (opsional):', error);
+                // Tidak menampilkan error ke user karena ini opsional
+            }
+        }
+
+        // Authentication Functions
+        function showLoginModal() {
+            document.getElementById('login-modal').classList.remove('hidden');
+        }
+
+        function hideLoginModal() {
+            document.getElementById('login-modal').classList.add('hidden');
+        }
+
+        /**
+         * Robust teacher matching:
+         * - search any column name that contains 'nip'
+         * - normalize by removing spaces, dots, dashes, then compare
+         * - fallback: try match by email or name substring if NIP not found
+         */
+        function normalizeId(id) {
+            if (id === undefined || id === null) return '';
+            return id.toString().replace(/[\s\-\.\,]/g, '').toLowerCase();
+        }
+
+        async function handleLogin(event) {
+            event.preventDefault();
+            const formData = new FormData(event.target);
+            const userType = formData.get('userType');
+            const identifier = (formData.get('identifier') || '').toString().trim();
+
+            // Validasi input
+            if (!userType) {
+                showNotification('Pilih jenis pengguna terlebih dahulu!', 'error');
+                return;
+            }
+
+            if (!identifier || identifier.trim() === '') {
+                showNotification('Masukkan ID pengguna!', 'error');
+                return;
+            }
+
+            showLoading(true);
+
+            try {
+                // Cek apakah data sudah dimuat
+                if (userType === 'student' && studentsData.length === 0) {
+                    showNotification('Data siswa belum dimuat. Coba refresh halaman.', 'error');
+                    showLoading(false);
+                    return;
+                }
+
+                if (userType === 'teacher' && teachersData.length === 0) {
+                    showNotification('Data guru belum dimuat. Coba refresh halaman.', 'error');
+                    showLoading(false);
+                    return;
+                }
+
+                let user = null;
+                let errorMessage = '';
+
+                console.log(`🔍 Mencari ${userType} dengan ID: "${identifier}"`);
+
+                if (userType === 'student') {
+                    console.log(`👥 Data siswa tersedia:`, studentsData.length, 'records');
+                    user = studentsData.find(s => {
+                        const nisn = (s.NISN || s.nisn || s.Nisn || s['NISN'] || '').toString().trim();
+                        return nisn && nisn === identifier;
+                    });
+
+                    if (user) {
+                        user.type = 'student';
+                        user.id = user.NISN || user.nisn || user.Nisn || user['NISN'];
+                        user.name = user.Nama || user.nama || user.Name || user['Nama'];
+                        user.class = user.Kelas || user.kelas || user.Class || user['Kelas'];
+                        console.log(`✅ Siswa ditemukan:`, user);
+                    } else {
+                        // suggestions
+                        const similarStudents = studentsData.filter(s => {
+                            const nisn = (s.NISN || s.nisn || s.Nisn || s['NISN'] || '').toString();
+                            return nisn && nisn.includes(identifier);
+                        });
+                        if (similarStudents.length > 0) {
+                            const suggestions = similarStudents.slice(0,3).map(s => s.NISN || s.nisn || s.Nisn || s['NISN']).join(', ');
+                            errorMessage = `NISN "${identifier}" tidak ditemukan. Mungkin maksud Anda: ${suggestions}`;
+                        } else {
+                            errorMessage = `NISN "${identifier}" tidak terdaftar. Pastikan NISN sudah benar dan terdaftar di Google Sheets.`;
+                        }
+                        console.log(`❌ NISN tidak ditemukan. Available NISNs:`, studentsData.map(s => s.NISN || s.nisn || s.Nisn || s['NISN']).filter(Boolean));
+                    }
+                } else if (userType === 'teacher') {
+                    console.log(`👨‍🏫 Data guru tersedia:`, teachersData.length, 'records');
+
+                    const inputNormalized = normalizeId(identifier);
+
+                    // 1) Try exact NIP match by any column that contains 'nip' in header
+                    user = teachersData.find(t => {
+                        const keys = Object.keys(t);
+                        for (const key of keys) {
+                            if (!key) continue;
+                            if (key.toString().toLowerCase().includes('nip')) {
+                                const val = t[key];
+                                if (val === undefined || val === null) continue;
+                                const normalized = normalizeId(val);
+                                if (normalized && normalized === inputNormalized) {
+                                    console.log(`🔍 Exact NIP match using column "${key}"`);
+                                    return true;
+                                }
+                            }
+                        }
+                        return false;
+                    });
+
+                    // 2) If not found, try matching by email (exact) or by name contains
+                    if (!user) {
+                        // email exact
+                        user = teachersData.find(t => {
+                            for (const key of Object.keys(t)) {
+                                if (key.toString().toLowerCase().includes('email')) {
+                                    const email = (t[key] || '').toString().trim().toLowerCase();
+                                    if (email && email === identifier.toLowerCase()) {
+                                        console.log('🔍 Matched teacher by email');
+                                        return true;
+                                    }
+                                }
+                            }
+                            return false;
+                        });
+                    }
+
+                    if (!user) {
+                        // name contains (case-insensitive, length limited)
+                        const idLower = identifier.toLowerCase();
+                        user = teachersData.find(t => {
+                            for (const key of Object.keys(t)) {
+                                if (key.toString().toLowerCase().includes('nama') || key.toString().toLowerCase().includes('name')) {
+                                    const nm = (t[key] || '').toString().toLowerCase();
+                                    if (nm && nm.includes(idLower)) return true;
+                                }
+                            }
+                            // last resort: any field contains
+                            return Object.values(t).some(v => (v || '').toString().toLowerCase().includes(idLower));
+                        });
+                    }
+
+                    if (user) {
+                        user.type = 'teacher';
+                        // extract fields robustly
+                        // find NIP
+                        let foundNip = '';
+                        for (const key of Object.keys(user)) {
+                            if (key.toString().toLowerCase().includes('nip') && user[key]) {
+                                foundNip = user[key].toString().trim();
+                                break;
+                            }
+                        }
+                        // find Nama
+                        let foundName = '';
+                        for (const key of Object.keys(user)) {
+                            const k = key.toString().toLowerCase();
+                            if ((k.includes('nama') || k.includes('name')) && user[key]) {
+                                foundName = user[key].toString().trim();
+                                break;
+                            }
+                        }
+                        // find Mapel
+                        let foundMapel = '';
+                        for (const key of Object.keys(user)) {
+                            const k = key.toString().toLowerCase();
+                            if ((k.includes('mata') && k.includes('pel')) || k.includes('mapel') || k.includes('subject')) {
+                                if (user[key]) {
+                                    foundMapel = user[key].toString().trim();
+                                    break;
+                                }
+                            }
+                        }
+                        // find Email
+                        let foundEmail = '';
+                        for (const key of Object.keys(user)) {
+                            if (key.toString().toLowerCase().includes('email') && user[key]) {
+                                foundEmail = user[key].toString().trim();
+                                break;
+                            }
+                        }
+
+                        user.id = foundNip || identifier;
+                        user.name = foundName || foundEmail || ('Guru ' + (foundNip || '').slice(-4));
+                        user.subject = foundMapel || 'Umum';
+                        user.email = foundEmail || '';
+                        
+                        console.log(`✅ Guru ditemukan:`, { id: user.id, name: user.name, subject: user.subject, email: user.email });
+                    } else {
+                        // Prepare helpful message with some examples if possible
+                        const availableNIPs = teachersData.map(t => {
+                            for (const key of Object.keys(t)) {
+                                if (key.toLowerCase().includes('nip') && t[key]) return t[key];
+                            }
+                            return null;
+                        }).filter(Boolean);
+                        console.log(`❌ Tidak ditemukan NIP. Available NIPs:`, availableNIPs);
+                        if (availableNIPs.length > 0) {
+                            const suggestions = availableNIPs.slice(0,3).join(', ');
+                            errorMessage = `NIP "${identifier}" tidak ditemukan. Contoh NIP yang ada: ${suggestions}`;
+                        } else {
+                            errorMessage = `NIP "${identifier}" tidak terdaftar. Pastikan kolom NIP, Nama, Mata Pelajaran, Email ada di sheet DataGuru.`;
+                        }
+                    }
+                }
+
+                if (user) {
+                    currentUser = user;
+                    showDashboard();
+                    showNotification(`Selamat datang, ${user.name}!`);
+                } else {
+                    showNotification(errorMessage || 'Data pengguna tidak ditemukan', 'error');
+                    showLoginHelp();
+                }
+            } catch (error) {
+                console.error('Login error:', error);
+                showNotification('Terjadi kesalahan saat login. Coba lagi dalam beberapa saat.', 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        function showLoginHelp() {
+            const helpDiv = document.getElementById('login-help');
+            if (helpDiv) {
+                helpDiv.classList.remove('hidden');
+                setTimeout(() => {
+                    helpDiv.classList.add('hidden');
+                }, 10000); // Hide after 10 seconds
+            }
+        }
+
+        function showDebugInfo() {
+            const debugModal = document.createElement('div');
+            debugModal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4';
+            debugModal.innerHTML = `
+                <div class="bg-white rounded-lg max-w-5xl w-full max-h-[90vh] overflow-y-auto p-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-bold">🔍 Debug Info - Analisis Koneksi Google Sheets</h3>
+                        <button onclick="this.closest('.fixed').remove()" class="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+                    </div>
+                    
+                    <div class="space-y-6">
+                        <!-- Status Koneksi -->
+                        <div class="p-4 border rounded-lg">
+                            <h4 class="font-semibold text-blue-600 mb-2">📊 Status Koneksi Google Sheets</h4>
+                            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                                <div class="text-center p-2 rounded ${studentsData.length > 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}">
+                                    <div class="font-semibold">${studentsData.length > 0 ? '✅' : '❌'}</div>
+                                    <div>DataSiswa</div>
+                                    <div class="text-xs">${studentsData.length} records</div>
+                                </div>
+                                <div class="text-center p-2 rounded ${teachersData.length > 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}">
+                                    <div class="font-semibold">${teachersData.length > 0 ? '✅' : '❌'}</div>
+                                    <div>DataGuru</div>
+                                    <div class="text-xs">${teachersData.length} records</div>
+                                </div>
+                                <div class="text-center p-2 rounded ${materialsData.length > 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}">
+                                    <div class="font-semibold">${materialsData.length > 0 ? '✅' : '❌'}</div>
+                                    <div>MateriPelajaran</div>
+                                    <div class="text-xs">${materialsData.length} records</div>
+                                </div>
+                                <div class="text-center p-2 rounded ${lkpdData.length > 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}">
+                                    <div class="font-semibold">${lkpdData.length > 0 ? '✅' : '❌'}</div>
+                                    <div>LKPD</div>
+                                    <div class="text-xs">${lkpdData.length} records</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Data Siswa -->
+                        <div class="border rounded-lg p-4">
+                            <h4 class="font-semibold text-blue-600 mb-2">👥 Data Siswa (${studentsData.length} records)</h4>
+                            <div class="bg-gray-50 p-3 rounded text-xs max-h-32 overflow-y-auto font-mono">
+                                ${studentsData.length > 0 ? 
+                                    studentsData.slice(0, 5).map(s => 
+                                        `NISN: ${escapeHtml(s.NISN || 'N/A')} | Nama: ${escapeHtml(s.Nama || 'N/A')} | Kelas: ${escapeHtml(s.Kelas || 'N/A')}`
+                                    ).join('<br>') + (studentsData.length > 5 ? '<br>... dan ' + (studentsData.length - 5) + ' lainnya' : '')
+                                    : '<span class="text-red-600">❌ Tidak ada data siswa yang dimuat</span>'
+                                }
+                            </div>
+                        </div>
+
+                        <!-- Data Guru -->
+                        <div class="border rounded-lg p-4">
+                            <h4 class="font-semibold text-blue-600 mb-2">👨‍🏫 Data Guru (${teachersData.length} records)</h4>
+                            <div class="bg-gray-50 p-3 rounded text-xs max-h-32 overflow-y-auto font-mono">
+                                ${teachersData.length > 0 ? 
+                                    teachersData.slice(0, 5).map(t => 
+                                        `NIP: ${escapeHtml(t.NIP || t.nip || 'N/A')} | Nama: ${escapeHtml(t.Nama || t.nama || 'N/A')} | Mapel: ${escapeHtml(t['Mata Pelajaran'] || t['mata_pelajaran'] || 'N/A')} | Email: ${escapeHtml(t.Email || t.email || 'N/A')}`
+                                    ).join('<br>') + (teachersData.length > 5 ? '<br>... dan ' + (teachersData.length - 5) + ' lainnya' : '') +
+                                    '<br><br><strong>🔍 Struktur kolom guru:</strong><br>' + 
+                                    (teachersData.length > 0 ? Object.keys(teachersData[0]).join(', ') : 'Tidak ada data')
+                                    : '<span class="text-red-600">❌ Tidak ada data guru yang dimuat</span>'
+                                }
+                            </div>
+                        </div>
+
+                        <!-- Data Materi -->
+                        <div class="border rounded-lg p-4">
+                            <h4 class="font-semibold text-blue-600 mb-2">📚 Data Materi Pembelajaran (${materialsData.length} records)</h4>
+                            <div class="bg-gray-50 p-3 rounded text-xs max-h-32 overflow-y-auto font-mono">
+                                ${materialsData.length > 0 ? 
+                                    materialsData.slice(0, 3).map(m => 
+                                        `ID: ${escapeHtml(m.ID || 'N/A')} | Judul: ${escapeHtml(m.Judul || 'N/A')} | Mapel: ${escapeHtml(m['Mata Pelajaran'] || 'N/A')} | Kelas: ${escapeHtml(m.Kelas || 'N/A')}`
+                                    ).join('<br>') + (materialsData.length > 3 ? '<br>... dan ' + (materialsData.length - 3) + ' lainnya' : '')
+                                    : '<span class="text-red-600">❌ Tidak ada data materi yang dimuat</span>'
+                                }
+                            </div>
+                        </div>
+
+                        <!-- Data LKPD -->
+                        <div class="border rounded-lg p-4">
+                            <h4 class="font-semibold text-blue-600 mb-2">📝 Data LKPD (${lkpdData.length} records)</h4>
+                            <div class="bg-gray-50 p-3 rounded text-xs max-h-32 overflow-y-auto font-mono">
+                                ${lkpdData.length > 0 ? 
+                                    lkpdData.slice(0, 3).map(l => {
+                                        const id = escapeHtml(l.ID || l.id || l.Id || 'N/A');
+                                        const judul = escapeHtml(l.Judul || l.judul || l.Title || 'N/A');
+                                        const mapel = escapeHtml(l['Mata Pelajaran'] || l['mata_pelajaran'] || l.MataPelajaran || l.Subject || 'N/A');
+                                        const kelas = escapeHtml(l.Kelas || l.kelas || l.Class || 'N/A');
+                                        return `ID: ${id} | Judul: ${judul} | Mapel: ${mapel} | Kelas: ${kelas}`;
+                                    }).join('<br>') + (lkpdData.length > 3 ? '<br>... dan ' + (lkpdData.length - 3) + ' lainnya' : '') +
+                                    '<br><br><strong>🔍 Struktur kolom LKPD:</strong><br>' + 
+                                    (lkpdData.length > 0 ? Object.keys(lkpdData[0]).join(', ') : 'Tidak ada data')
+                                    : '<span class="text-red-600">❌ Tidak ada data LKPD yang dimuat</span>'
+                                }
+                            </div>
+                        </div>
+
+                        <!-- URL Testing -->
+                        <div class="border rounded-lg p-4">
+                            <h4 class="font-semibold text-blue-600 mb-2">🔗 URL Google Sheets yang Digunakan</h4>
+                            <div class="bg-gray-50 p-3 rounded text-xs">
+                                <p class="mb-2"><strong>Sheet ID:</strong> ${escapeHtml(SHEET_CONFIG.SHEET_ID)}</p>
+                                <p class="mb-2"><strong>Base URL:</strong></p>
+                                <p class="font-mono text-blue-600 break-all">
+                                    https://docs.google.com/spreadsheets/d/${escapeHtml(SHEET_CONFIG.SHEET_ID)}/gviz/tq?tqx=out:json&sheet=[NAMA_SHEET]
+                                </p>
+                            </div>
+                        </div>
+
+                        <!-- Troubleshooting -->
+                        <div class="border border-yellow-300 rounded-lg p-4 bg-yellow-50">
+                            <h4 class="font-semibold text-yellow-800 mb-2">🛠️ Panduan Troubleshooting</h4>
+                            <div class="text-sm text-yellow-800 space-y-2">
+                                <div><strong>Jika semua data kosong:</strong></div>
+                                <ul class="list-disc list-inside ml-4 space-y-1">
+                                    <li>Pastikan Google Sheets diatur sebagai "Anyone with link can view"</li>
+                                    <li>Cek nama sheet harus persis: DataSiswa, DataGuru, MateriPelajaran, LKPD</li>
+                                    <li>Pastikan baris pertama berisi header kolom</li>
+                                    <li>Pastikan tidak ada baris kosong di awal data</li>
+                                </ul>
+                                
+                                <div class="mt-3"><strong>Format kolom yang diperlukan:</strong></div>
+                                <ul class="list-disc list-inside ml-4 space-y-1 text-xs">
+                                    <li><strong>DataSiswa:</strong> NISN, Nama, Kelas</li>
+                                    <li><strong>DataGuru:</strong> NIP, Nama, Mata Pelajaran, Email</li>
+                                    <li><strong>MateriPelajaran:</strong> ID, Judul, Deskripsi, Mata Pelajaran, Kelas, Tipe, Link</li>
+                                    <li><strong>LKPD:</strong> ID, Judul, Mata Pelajaran, Kelas, Link, Deskripsi</li>
+                                </ul>
+                            </div>
+                        </div>
+
+                        <!-- Refresh Button -->
+                        <div class="text-center">
+                            <button onclick="this.closest('.fixed').remove(); loadAllData();" 
+                                    class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors">
+                                🔄 Refresh Data Sekarang
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(debugModal);
+        }
+
+        function logout() {
+            currentUser = null;
+            showLoginScreen();
+            showNotification('Anda telah logout');
+        }
+
+        // UI Functions
+        function showLoginScreen() {
+            document.getElementById('login-screen').classList.remove('hidden');
+            document.getElementById('dashboard-screen').classList.add('hidden');
+        }
+
+        function showDashboard() {
+            document.getElementById('login-screen').classList.add('hidden');
+            document.getElementById('dashboard-screen').classList.remove('hidden');
+            updateDashboard();
+        }
+
+        function updateDashboard() {
+            if (!currentUser) return;
+
+            document.getElementById('user-name').textContent = currentUser.name;
+            document.getElementById('user-info').textContent = 
+                currentUser.type === 'student' ? `Kelas ${currentUser.class}` : `Guru ${currentUser.subject}`;
+
+            if (currentUser.type === 'student') {
+                showStudentDashboard();
+            } else {
+                showTeacherDashboard();
+            }
+        }
+
+        function showStudentDashboard() {
+            const studentClass = currentUser.class ? currentUser.class.toString().trim() : '';
+            const classNumber = studentClass.charAt(0); // Get class number (7, 8, 9)
+            console.log(`👥 Student dashboard - Full Class: "${studentClass}", Class Number: "${classNumber}"`);
+            
+            // Filter materials dengan berbagai kemungkinan field names dan format
+            const availableMaterials = materialsData.filter(m => {
+                const kelas = (m.Kelas || m.kelas || m.Class || m.class || m['Kelas'] || '').toString().trim();
+                const match = kelas === studentClass || kelas === classNumber || kelas.includes(classNumber);
+                return match;
+            });
+            
+            // Filter LKPD dengan berbagai kemungkinan field names dan format - lebih fleksibel
+            const availableLKPD = lkpdData.filter(l => {
+                const kelas = (l.Kelas || l.kelas || l.Class || l.class || l['Kelas'] || '').toString().trim();
+                const match = kelas === studentClass || kelas === classNumber || kelas.includes(classNumber) || 
+                             studentClass.includes(kelas) || classNumber === kelas;
+                return match;
+            });
+
+            renderMaterials(availableMaterials);
+            renderLKPD(availableLKPD);
+            updateStudentProgress();
+        }
+
+        function showTeacherDashboard() {
+            const teacherSubject = currentUser.subject || '';
+            console.log(`👨‍🏫 Teacher dashboard - Subject: ${teacherSubject}`);
+            
+            // Filter materials dengan berbagai kemungkinan field names
+            const subjectMaterials = materialsData.filter(m => {
+                const mataPelajaran = m['Mata Pelajaran'] || m['mata_pelajaran'] || m.MataPelajaran || m.Subject || m.subject || '';
+                return mataPelajaran === teacherSubject;
+            });
+            
+            // Filter LKPD dengan berbagai kemungkinan field names
+            const subjectLKPD = lkpdData.filter(l => {
+                const mataPelajaran = l['Mata Pelajaran'] || l['mata_pelajaran'] || l.MataPelajaran || l.Subject || l.subject || '';
+                return mataPelajaran === teacherSubject;
+            });
+
+            renderMaterials(subjectMaterials);
+            renderLKPD(subjectLKPD);
+            renderStudentProgress();
+        }
+
+        function renderMaterials(materials) {
+            const container = document.getElementById('materials-container');
+            container.innerHTML = '';
+
+            if (materials.length === 0) {
+                container.innerHTML = '<p class="text-gray-500 text-center py-8">Belum ada materi tersedia</p>';
+                return;
+            }
+
+            materials.forEach(material => {
+                const card = document.createElement('div');
+                card.className = 'bg-white rounded-lg shadow-md p-6 card-hover fade-in';
+                const judul = escapeHtml(material.Judul || material.judul || material.Title || 'Materi Tanpa Judul');
+                const deskripsi = escapeHtml(material.Deskripsi || material.deskripsi || material.Description || '');
+                const mataPelajaran = escapeHtml(material['Mata Pelajaran'] || material['mata_pelajaran'] || material.MataPelajaran || material.Subject || '');
+                const kelas = escapeHtml(material.Kelas || material.kelas || material.Class || '');
+                const tipe = escapeHtml(material.Tipe || material.tipe || '');
+                let link = material.Link || material.link || material.URL || material.url || material.Tautan || material.tautan || '';
+                link = (link || '').toString().trim();
+                if (link && !/^https?:\/\//i.test(link)) {
+                    link = 'https://' + link;
+                }
+
+                card.innerHTML = `
+                    <div class="flex items-start justify-between mb-4">
+                        <div class="flex-1">
+                            <h3 class="text-lg font-semibold text-gray-800 mb-2">${judul}</h3>
+                            <p class="text-sm text-gray-600 mb-2">${deskripsi}</p>
+                            <div class="flex items-center space-x-4 text-sm text-gray-500">
+                                <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded">${mataPelajaran}</span>
+                                <span class="bg-green-100 text-green-800 px-2 py-1 rounded">Kelas ${kelas}</span>
+                                <span class="bg-purple-100 text-purple-800 px-2 py-1 rounded">${tipe}</span>
+                            </div>
+                        </div>
+                        <div class="ml-4">
+                            ${tipe === 'video' ? '🎥' : '📄'}
+                        </div>
+                    </div>
+                `;
+
+                const btn = document.createElement('button');
+                btn.className = 'w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors';
+                btn.textContent = link ? 'Akses Materi' : 'Link Tidak Tersedia';
+                if (!link) {
+                    btn.disabled = true;
+                    btn.classList.remove('bg-blue-600');
+                    btn.classList.add('bg-gray-300','text-gray-500','cursor-not-allowed');
+                } else {
+                    btn.addEventListener('click', function() {
+                        accessMaterial(material.ID || material.id || material.Id || '', material.Judul || material.judul || material.Title || '', link, material['Mata Pelajaran'] || material['mata_pelajaran'] || material.MataPelajaran || material.Subject || material.subject || '');
+                    });
+                }
+
+                card.appendChild(btn);
+                container.appendChild(card);
+            });
+        }
+
+        function renderLKPD(lkpdList) {
+            const container = document.getElementById('lkpd-container');
+            container.innerHTML = '';
+
+            console.log(`📝 Rendering LKPD:`, lkpdList.length, 'items');
+            console.log(`📋 Sample LKPD data:`, lkpdList.slice(0, 2));
+
+            if (lkpdList.length === 0) {
+                container.innerHTML = '<p class="text-gray-500 text-center py-8">Belum ada LKPD tersedia</p>';
+                return;
+            }
+
+            lkpdList.forEach((lkpd, index) => {
+                const id = lkpd.ID || lkpd.id || lkpd.Id || lkpd['ID'] || `lkpd-${index}`;
+                const judul = lkpd.Judul || lkpd.judul || lkpd.Title || lkpd.title || lkpd['Judul'] || 'LKPD Tanpa Judul';
+                const mataPelajaran = lkpd['Mata Pelajaran'] || lkpd['mata_pelajaran'] || lkpd.MataPelajaran || lkpd.Subject || lkpd.subject || 'Umum';
+                const kelas = lkpd.Kelas || lkpd.kelas || lkpd.Class || lkpd.class || lkpd['Kelas'] || '-';
+                let link = lkpd.Link || lkpd.link || lkpd.URL || lkpd.url || lkpd.Tautan || lkpd.tautan || lkpd['Link'] || '';
+                const deskripsi = lkpd.Deskripsi || lkpd.deskripsi || lkpd.Description || lkpd.description || lkpd['Deskripsi'] || 'Tidak ada deskripsi';
+
+                link = (link || '').toString().trim();
+                let normalizedLink = '';
+                let isValidLink = false;
+
+                if (link && link !== '#') {
+                    if (/^https?:\/\//i.test(link)) {
+                        normalizedLink = link;
+                        isValidLink = true;
+                    } else if (link.startsWith('www.')) {
+                        normalizedLink = 'https://' + link;
+                        isValidLink = true;
+                    } else if (link.includes('.') && !link.includes(' ')) {
+                        normalizedLink = 'https://' + link;
+                        isValidLink = true;
+                    } else if (link.startsWith('//')) {
+                        normalizedLink = 'https:' + link;
+                        isValidLink = true;
+                    }
+                }
+
+                console.log(`🔗 LKPD [${index}]: original="${link}" normalized="${normalizedLink}" isValid=${isValidLink}`);
+
+                const card = document.createElement('div');
+                card.className = 'bg-white rounded-lg shadow-md p-6 card-hover fade-in';
+                card.innerHTML = `
+                    <div class="flex items-start justify-between mb-4">
+                        <div class="flex-1">
+                            <h3 class="text-lg font-semibold text-gray-800 mb-2">${escapeHtml(judul)}</h3>
+                            <p class="text-sm text-gray-600 mb-2">${escapeHtml(deskripsi)}</p>
+                            <div class="flex items-center space-x-2 text-sm text-gray-500 flex-wrap gap-2">
+                                <span class="bg-orange-100 text-orange-800 px-2 py-1 rounded">${escapeHtml(mataPelajaran)}</span>
+                                <span class="bg-green-100 text-green-800 px-2 py-1 rounded">Kelas ${escapeHtml(kelas)}</span>
+                                ${isValidLink ? '<span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">✓ Link Tersedia</span>' : '<span class="bg-red-100 text-red-800 px-2 py-1 rounded text-xs">✗ No Link</span>'}
+                            </div>
+                            ${!isValidLink && link ? `<p class="text-xs text-red-500 mt-2">Link asli: ${escapeHtml(link)}</p>` : ''}
+                        </div>
+                        <div class="ml-4">📝</div>
+                    </div>
+                `;
+
+                // create button and add listener
+                const btn = document.createElement('button');
+                btn.className = `w-full py-2 px-4 rounded-lg transition-colors font-medium ${isValidLink ? 'bg-orange-600 text-white hover:bg-orange-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`;
+                btn.textContent = isValidLink ? 'Kerjakan LKPD' : 'Link Tidak Tersedia';
+                if (!isValidLink) {
+                    btn.disabled = true;
+                } else {
+                    btn.addEventListener('click', function() {
+                        accessLKPD(id, judul, normalizedLink, mataPelajaran);
+                    });
+                }
+
+                card.appendChild(btn);
+                container.appendChild(card);
+            });
+        }
+
+        async function accessMaterial(materialId, title, link, subject) {
+            if (currentUser && currentUser.type === 'student') {
+                await saveProgress({
+                    student_id: currentUser.id,
+                    student_name: currentUser.name,
+                    class_grade: currentUser.class,
+                    subject: subject,
+                    material_id: materialId,
+                    material_title: title,
+                    progress_type: 'material_access',
+                    progress_value: 1,
+                    session_duration: 0
+                });
+            }
+            
+            try {
+                window.open(link, '_blank', 'noopener,noreferrer');
+            } catch (e) {
+                showNotification('Gagal membuka materi. Periksa link.', 'error');
+            }
+        }
+
+        async function accessLKPD(lkpdId, title, link, subject) {
+            // Validasi link sebelum membuka
+            if (!link || link === '#' || link.trim() === '') {
+                showNotification('Link LKPD tidak tersedia atau tidak valid', 'error');
+                return;
+            }
+
+            // Normalisasi link jika diperlukan
+            let normalizedLink = link;
+            if (link.startsWith('www.')) {
+                normalizedLink = 'https://' + link;
+            }
+
+            if (currentUser && currentUser.type === 'student') {
+                await saveProgress({
+                    student_id: currentUser.id,
+                    student_name: currentUser.name,
+                    class_grade: currentUser.class,
+                    subject: subject,
+                    material_id: lkpdId,
+                    material_title: title,
+                    progress_type: 'lkpd_access',
+                    progress_value: 1,
+                    session_duration: 0
+                });
+            }
+            
+            try {
+                window.open(normalizedLink, '_blank', 'noopener,noreferrer');
+                showNotification(`Membuka LKPD: ${title}`);
+            } catch (error) {
+                showNotification('Gagal membuka LKPD. Periksa link atau coba lagi.', 'error');
+                console.error('Error opening LKPD:', error);
+            }
+        }
+
+        function updateStudentProgress() {
+            if (!currentUser) return;
+            const studentProgress = progressData.filter(p => p.student_id === currentUser.id);
+            const container = document.getElementById('progress-container');
+            
+            if (studentProgress.length === 0) {
+                container.innerHTML = '<p class="text-gray-500 text-center py-8">Belum ada aktivitas pembelajaran</p>';
+                return;
+            }
+
+            const progressBySubject = {};
+            studentProgress.forEach(p => {
+                if (!progressBySubject[p.subject]) {
+                    progressBySubject[p.subject] = { materials: 0, lkpd: 0 };
+                }
+                if (p.progress_type === 'material_access') {
+                    progressBySubject[p.subject].materials++;
+                } else if (p.progress_type === 'lkpd_access') {
+                    progressBySubject[p.subject].lkpd++;
+                }
+            });
+
+            container.innerHTML = Object.entries(progressBySubject).map(([subject, progress]) => `
+                <div class="bg-white rounded-lg shadow-md p-4">
+                    <h4 class="font-semibold text-gray-800 mb-2">${escapeHtml(subject)}</h4>
+                    <div class="space-y-2">
+                        <div class="flex justify-between text-sm">
+                            <span>Materi diakses:</span>
+                            <span class="font-semibold">${progress.materials}</span>
+                        </div>
+                        <div class="flex justify-between text-sm">
+                            <span>LKPD dikerjakan:</span>
+                            <span class="font-semibold">${progress.lkpd}</span>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function renderStudentProgress() {
+            const container = document.getElementById('progress-container');
+            
+            if (progressData.length === 0) {
+                container.innerHTML = '<p class="text-gray-500 text-center py-8">Belum ada data aktivitas siswa</p>';
+                return;
+            }
+
+            const progressByStudent = {};
+            progressData.forEach(p => {
+                if (!progressByStudent[p.student_name]) {
+                    progressByStudent[p.student_name] = { 
+                        class: p.class_grade, 
+                        materials: 0, 
+                        lkpd: 0,
+                        subjects: new Set()
+                    };
+                }
+                progressByStudent[p.student_name].subjects.add(p.subject);
+                if (p.progress_type === 'material_access') {
+                    progressByStudent[p.student_name].materials++;
+                } else if (p.progress_type === 'lkpd_access') {
+                    progressByStudent[p.student_name].lkpd++;
+                }
+            });
+
+            container.innerHTML = Object.entries(progressByStudent).map(([name, data]) => `
+                <div class="bg-white rounded-lg shadow-md p-4">
+                    <div class="flex justify-between items-start mb-2">
+                        <h4 class="font-semibold text-gray-800">${escapeHtml(name)}</h4>
+                        <span class="text-sm bg-blue-100 text-blue-800 px-2 py-1 rounded">${escapeHtml(data.class)}</span>
+                    </div>
+                    <div class="space-y-1 text-sm text-gray-600">
+                        <div class="flex justify-between">
+                            <span>Materi diakses:</span>
+                            <span class="font-semibold">${data.materials}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span>LKPD dikerjakan:</span>
+                            <span class="font-semibold">${data.lkpd}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span>Mata pelajaran:</span>
+                            <span class="font-semibold">${data.subjects.size}</span>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function updateProgressDisplay() {
+            if (currentUser) {
+                if (currentUser.type === 'student') {
+                    updateStudentProgress();
+                } else {
+                    renderStudentProgress();
+                }
+            }
+        }
+
+        // Element SDK Implementation
+        const render = async (config) => {
+            document.getElementById('school-name').textContent = config.school_name || defaultConfig.school_name;
+            document.getElementById('school-vision').textContent = config.school_vision || defaultConfig.school_vision;
+            document.getElementById('welcome-message').textContent = config.welcome_message || defaultConfig.welcome_message;
+            document.getElementById('footer-message').textContent = config.footer_message || defaultConfig.footer_message;
+            
+            // Apply colors
+            const primaryColor = config.primary_color || defaultConfig.primary_color;
+            const secondaryColor = config.secondary_color || defaultConfig.secondary_color;
+            
+            document.documentElement.style.setProperty('--primary-color', primaryColor);
+            document.documentElement.style.setProperty('--secondary-color', secondaryColor);
+        };
+
+        const mapToCapabilities = (config) => ({
+            recolorables: [
+                {
+                    get: () => config.primary_color || defaultConfig.primary_color,
+                    set: (value) => {
+                        if (window.elementSdk) {
+                            window.elementSdk.setConfig({ primary_color: value });
+                        }
+                    }
+                },
+                {
+                    get: () => config.secondary_color || defaultConfig.secondary_color,
+                    set: (value) => {
+                        if (window.elementSdk) {
+                            window.elementSdk.setConfig({ secondary_color: value });
+                        }
+                    }
+                },
+                {
+                    get: () => config.accent_color || defaultConfig.accent_color,
+                    set: (value) => {
+                        if (window.elementSdk) {
+                            window.elementSdk.setConfig({ accent_color: value });
+                        }
+                    }
+                }
+            ],
+            borderables: [],
+            fontEditable: undefined,
+            fontSizeable: undefined
+        });
+
+        const mapToEditPanelValues = (config) => new Map([
+            ["school_name", config.school_name || defaultConfig.school_name],
+            ["school_vision", config.school_vision || defaultConfig.school_vision],
+            ["welcome_message", config.welcome_message || defaultConfig.welcome_message],
+            ["footer_message", config.footer_message || defaultConfig.footer_message]
+        ]);
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', async () => {
+            if (window.dataSdk) {
+                const initResult = await window.dataSdk.init(dataHandler);
+                if (!initResult.isOk) {
+                    console.error("Failed to initialize data SDK");
+                }
+            }
+            
+            if (window.elementSdk) {
+                window.elementSdk.init({
+                    defaultConfig,
+                    render,
+                    mapToCapabilities,
+                    mapToEditPanelValues
+                });
+            }
+
+            await loadAllData();
+        });
+    </script><!-- Login Screen -->
+  <div id="login-screen" class="min-h-full"><!-- Header -->
+   <header class="bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-lg">
+    <div class="container mx-auto px-4 py-8">
+     <div class="text-center">
+      <h1 id="school-name" class="text-4xl font-bold mb-2">SMP Negeri 1 Indonesia</h1>
+      <p id="school-vision" class="text-xl text-blue-100 mb-4">Mewujudkan Generasi Cerdas, Berkarakter, dan Berdaya Saing Global</p>
+      <p id="welcome-message" class="text-lg text-blue-200">Selamat datang di portal pembelajaran digital yang inovatif</p>
+     </div>
+    </div>
+   </header><!-- Login Section -->
+   <div class="container mx-auto px-4 py-12">
+    <div class="max-w-md mx-auto bg-white rounded-lg shadow-lg p-8">
+     <div class="text-center mb-8">
+      <div class="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4"><span class="text-3xl">🎓</span>
+      </div>
+      <h2 class="text-2xl font-bold text-gray-800 mb-2">Portal Pembelajaran</h2>
+      <p class="text-gray-600">Masuk untuk mengakses materi dan LKPD</p>
+     </div>
+     <form onsubmit="handleLogin(event)" class="space-y-6">
+      <div><label class="block text-sm font-medium text-gray-700 mb-2">Jenis Pengguna</label> <select name="userType" required class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"> <option value="">Pilih jenis pengguna</option> <option value="student">Siswa</option> <option value="teacher">Guru</option> </select>
+      </div>
+      <div><label class="block text-sm font-medium text-gray-700 mb-2">ID Pengguna</label> <input type="text" name="identifier" required placeholder="Masukkan NISN (siswa) atau NIP (guru)" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div><button type="submit" class="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 transition-colors font-medium">
+       <div class="loading-indicator hidden items-center justify-center">
+        <div class="loading-spinner mr-2"></div> Memuat...
+       </div><span class="login-text">Masuk</span> </button> <!-- Debug Button --> <button type="button" onclick="showDebugInfo()" class="w-full mt-2 bg-gray-500 text-white py-2 px-4 rounded-lg hover:bg-gray-600 transition-colors text-sm"> 🔍 Lihat Data yang Dimuat </button>
+     </form>
+     <div class="mt-6 p-4 bg-gray-50 rounded-lg">
+      <h3 class="font-semibold text-gray-800 mb-2">Petunjuk Login:</h3>
+      <div class="text-sm text-gray-600 space-y-2">
+       <div>
+        <p><strong>Siswa:</strong> Gunakan NISN (Nomor Induk Siswa Nasional)</p>
+        <p class="text-xs text-gray-500">Contoh: 2024001, 2024002, 2024003</p>
+       </div>
+       <div>
+        <p><strong>Guru:</strong> Gunakan NIP (Nomor Induk Pegawai)</p>
+        <p class="text-xs text-gray-500">Contoh: 196801011990031001</p>
+       </div>
+       <div class="mt-3 p-2 bg-blue-50 rounded border-l-4 border-blue-400">
+        <p class="text-xs text-blue-700"><strong>Catatan:</strong> Pastikan data Anda sudah terdaftar di Google Sheets dan dapat diakses publik.</p>
+       </div>
+      </div>
+     </div><!-- Login Help (Hidden by default) -->
+     <div id="login-help" class="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg hidden">
+      <h4 class="font-semibold text-red-800 mb-2">❌ Gagal Login?</h4>
+      <div class="text-sm text-red-700 space-y-2">
+       <p><strong>Kemungkinan penyebab:</strong></p>
+       <ul class="list-disc list-inside space-y-1 ml-2">
+        <li>ID belum terdaftar di Google Sheets</li>
+        <li>Google Sheets belum diatur sebagai "Anyone with link can view"</li>
+        <li>Nama sheet tidak sesuai (harus: DataSiswa, DataGuru)</li>
+        <li>Kolom di sheet tidak sesuai format</li>
+       </ul>
+       <div class="mt-3 p-2 bg-yellow-50 border border-yellow-200 rounded">
+        <p class="text-xs text-yellow-800"><strong>Solusi:</strong> Hubungi administrator untuk memastikan data Anda sudah terdaftar dengan benar.</p>
+       </div>
+      </div>
+     </div>
+    </div>
+   </div>
+  </div><!-- Dashboard Screen -->
+  <div id="dashboard-screen" class="min-h-full hidden"><!-- Header -->
+   <header class="bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-lg">
+    <div class="container mx-auto px-4 py-6">
+     <div class="flex items-center justify-between">
+      <div>
+       <h1 class="text-2xl font-bold">Dashboard Pembelajaran</h1>
+       <p class="text-blue-100"><span id="user-name">Pengguna</span> • <span id="user-info">Info</span></p>
+      </div><button onclick="logout()" class="bg-blue-500 hover:bg-blue-400 px-4 py-2 rounded-lg transition-colors"> Logout </button>
+     </div>
+    </div>
+   </header>
+   <div class="container mx-auto px-4 py-8"><!-- Navigation Tabs -->
+    <div class="flex space-x-1 bg-gray-100 p-1 rounded-lg mb-8"><button onclick="showTab('materials')" id="materials-tab" class="flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors bg-white text-blue-600 shadow-sm"> 📚 Materi Pembelajaran </button> <button onclick="showTab('lkpd')" id="lkpd-tab" class="flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors text-gray-500 hover:text-gray-700"> 📝 LKPD </button> <button onclick="showTab('progress')" id="progress-tab" class="flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors text-gray-500 hover:text-gray-700"> 📊 Progress </button>
+    </div><!-- Tab Contents -->
+    <div id="materials-content" class="tab-content">
+     <div class="mb-6">
+      <h2 class="text-xl font-bold text-gray-800 mb-2">Materi Pembelajaran</h2>
+      <p class="text-gray-600">Akses video pembelajaran dan dokumen materi</p>
+     </div>
+     <div id="materials-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div class="loading-indicator flex items-center justify-center py-12">
+       <div class="loading-spinner mr-2"></div><span>Memuat materi...</span>
+      </div>
+     </div>
+    </div>
+    <div id="lkpd-content" class="tab-content hidden">
+     <div class="mb-6">
+      <h2 class="text-xl font-bold text-gray-800 mb-2">Lembar Kerja Peserta Didik</h2>
+      <p class="text-gray-600">Kerjakan LKPD untuk memperdalam pemahaman</p>
+     </div>
+     <div id="lkpd-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div class="loading-indicator flex items-center justify-center py-12">
+       <div class="loading-spinner mr-2"></div><span>Memuat LKPD...</span>
+      </div>
+     </div>
+    </div>
+    <div id="progress-content" class="tab-content hidden">
+     <div class="mb-6">
+      <h2 class="text-xl font-bold text-gray-800 mb-2">Progress Pembelajaran</h2>
+      <p class="text-gray-600">Pantau aktivitas dan kemajuan pembelajaran</p>
+     </div>
+     <div id="progress-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div class="loading-indicator flex items-center justify-center py-12">
+       <div class="loading-spinner mr-2"></div><span>Memuat progress...</span>
+      </div>
+     </div>
+    </div>
+   </div>
+  </div><!-- Footer -->
+  <footer class="bg-gray-800 text-white py-8 mt-12">
+   <div class="container mx-auto px-4 text-center">
+    <p id="footer-message" class="text-lg font-semibold mb-2">Merdeka Belajar - Indonesia Maju 2045</p>
+    <p class="text-gray-400">© 2024 Sistem Pembelajaran Interaktif SMP</p>
+   </div>
+  </footer>
+  <script>
+        // Tab Management
+        function showTab(tabName) {
+            // Hide all tab contents
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.add('hidden');
+            });
+            
+            // Remove active class from all tabs
+            document.querySelectorAll('[id$="-tab"]').forEach(tab => {
+                tab.classList.remove('bg-white', 'text-blue-600', 'shadow-sm');
+                tab.classList.add('text-gray-500', 'hover:text-gray-700');
+            });
+            
+            // Show selected tab content
+            document.getElementById(`${tabName}-content`).classList.remove('hidden');
+            
+            // Add active class to selected tab
+            const activeTab = document.getElementById(`${tabName}-tab`);
+            activeTab.classList.add('bg-white', 'text-blue-600', 'shadow-sm');
+            activeTab.classList.remove('text-gray-500', 'hover:text-gray-700');
+        }
+    </script>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'98f00d8364f73d86',t:'MTc2MDUzOTAyOS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
