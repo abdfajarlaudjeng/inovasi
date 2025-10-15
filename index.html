@@ -95,6 +95,7 @@
             TEACHERS_SHEET: 'DataGuru', 
             MATERIALS_SHEET: 'MateriPelajaran',
             LKPD_SHEET: 'LKPD',
+            LKPD_GID: '1727674162', // GID spesifik untuk sheet LKPD
             PROGRESS_SHEET: 'ProgressSiswa'
         };
 
@@ -151,6 +152,11 @@
         async function fetchGoogleSheetData(sheetName) {
             try {
                 console.log(`🔄 Memulai fetch untuk sheet: ${sheetName}`);
+                
+                // Untuk sheet LKPD, gunakan GID spesifik
+                if (sheetName === 'LKPD' && SHEET_CONFIG.LKPD_GID) {
+                    return await fetchLKPDWithGID();
+                }
                 
                 // Coba beberapa format URL yang berbeda dengan encoding yang tepat
                 const encodedSheetName = encodeURIComponent(sheetName);
@@ -299,6 +305,196 @@
             } catch (error) {
                 console.error(`💥 Fatal error fetching ${sheetName}:`, error);
                 showNotification(`Gagal memuat ${sheetName}: ${error.message}`, 'error');
+                return [];
+            }
+        }
+
+        async function fetchLKPDWithGID() {
+            try {
+                console.log(`🔄 Memulai fetch LKPD dengan GID: ${SHEET_CONFIG.LKPD_GID}`);
+                
+                // URL khusus untuk sheet LKPD menggunakan GID
+                const urls = [
+                    `https://docs.google.com/spreadsheets/d/${SHEET_CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&gid=${SHEET_CONFIG.LKPD_GID}`,
+                    `https://docs.google.com/spreadsheets/d/${SHEET_CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&gid=${SHEET_CONFIG.LKPD_GID}&headers=1`,
+                    `https://docs.google.com/spreadsheets/d/${SHEET_CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&gid=${SHEET_CONFIG.LKPD_GID}&range=A:F`,
+                    `https://docs.google.com/spreadsheets/d/${SHEET_CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&gid=${SHEET_CONFIG.LKPD_GID}&range=A1:F1000`,
+                    // Fallback dengan sheet name
+                    `https://docs.google.com/spreadsheets/d/${SHEET_CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&sheet=LKPD`,
+                    `https://docs.google.com/spreadsheets/d/${SHEET_CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&sheet=LKPD&headers=1`
+                ];
+
+                let lastError = null;
+                let attemptCount = 0;
+                
+                for (const url of urls) {
+                    attemptCount++;
+                    try {
+                        console.log(`📡 LKPD Percobaan ${attemptCount}: ${url}`);
+                        
+                        const response = await fetch(url, {
+                            method: 'GET',
+                            headers: {
+                                'Accept': 'application/json, text/plain, */*',
+                                'Cache-Control': 'no-cache'
+                            }
+                        });
+                        
+                        if (!response.ok) {
+                            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                        }
+                        
+                        const text = await response.text();
+                        console.log(`📄 LKPD Response length:`, text.length);
+                        
+                        if (text.length < 50) {
+                            throw new Error('Response terlalu pendek untuk LKPD');
+                        }
+                        
+                        // Parse response
+                        let jsonText = text;
+                        
+                        if (text.startsWith('/*O_o*/\ngoogle.visualization.Query.setResponse(')) {
+                            jsonText = text.substring(47, text.length - 2);
+                        } else if (text.includes('google.visualization.Query.setResponse(')) {
+                            const start = text.indexOf('google.visualization.Query.setResponse(') + 39;
+                            const end = text.lastIndexOf(');');
+                            if (end > start) {
+                                jsonText = text.substring(start, end);
+                            }
+                        } else if (text.trim().startsWith('{')) {
+                            jsonText = text;
+                        }
+                        
+                        const json = JSON.parse(jsonText);
+                        console.log(`🔍 LKPD Parsed JSON structure:`, {
+                            hasTable: !!json.table,
+                            hasRows: !!(json.table && json.table.rows),
+                            rowCount: json.table && json.table.rows ? json.table.rows.length : 0,
+                            hasColumns: !!(json.table && json.table.cols),
+                            colCount: json.table && json.table.cols ? json.table.cols.length : 0
+                        });
+                        
+                        if (json.status === 'error') {
+                            throw new Error(`Google Sheets API Error: ${json.errors?.[0]?.detailed_message || 'Unknown error'}`);
+                        }
+                        
+                        if (!json.table || !json.table.rows || json.table.rows.length === 0) {
+                            console.warn(`⚠️ Sheet LKPD kosong pada percobaan ${attemptCount}`);
+                            continue; // Try next URL
+                        }
+                        
+                        if (!json.table.cols || json.table.cols.length === 0) {
+                            throw new Error('Tidak ada kolom yang ditemukan di LKPD');
+                        }
+                        
+                        // Extract headers dengan prioritas kolom LKPD
+                        const headers = json.table.cols.map((col, index) => {
+                            const label = col.label || col.id || `Column_${index}`;
+                            console.log(`📋 LKPD Column ${index}: "${label}"`);
+                            return label;
+                        });
+                        
+                        console.log(`📋 LKPD Headers:`, headers);
+                        
+                        // Validasi apakah headers sesuai dengan yang diharapkan
+                        const expectedHeaders = ['ID', 'Judul', 'Mata Pelajaran', 'Kelas', 'Link', 'Deskripsi'];
+                        const hasExpectedHeaders = expectedHeaders.some(expected => 
+                            headers.some(header => 
+                                header.toLowerCase().includes(expected.toLowerCase()) ||
+                                expected.toLowerCase().includes(header.toLowerCase())
+                            )
+                        );
+                        
+                        if (!hasExpectedHeaders) {
+                            console.warn(`⚠️ Headers tidak sesuai pada percobaan ${attemptCount}. Expected: ${expectedHeaders.join(', ')}, Got: ${headers.join(', ')}`);
+                            // Tetap lanjutkan karena mungkin header berbeda tapi data benar
+                        }
+                        
+                        // Process data dengan mapping yang lebih fleksibel
+                        const data = json.table.rows.map((row, rowIndex) => {
+                            const obj = {};
+                            headers.forEach((header, colIndex) => {
+                                const cell = row.c && row.c[colIndex];
+                                let value = '';
+                                
+                                if (cell) {
+                                    value = cell.f || cell.v || '';
+                                    if (value !== null && value !== undefined) {
+                                        value = value.toString().trim();
+                                    }
+                                }
+                                
+                                // Mapping fleksibel untuk kolom LKPD
+                                let mappedKey = header;
+                                
+                                // Mapping berdasarkan posisi kolom jika header tidak standar
+                                if (colIndex === 0 && (header.toLowerCase().includes('id') || header === 'A' || !header)) {
+                                    mappedKey = 'ID';
+                                } else if (colIndex === 1 && (header.toLowerCase().includes('judul') || header.toLowerCase().includes('title') || header === 'B')) {
+                                    mappedKey = 'Judul';
+                                } else if (colIndex === 2 && (header.toLowerCase().includes('mata') || header.toLowerCase().includes('pelajaran') || header.toLowerCase().includes('subject') || header === 'C')) {
+                                    mappedKey = 'Mata Pelajaran';
+                                } else if (colIndex === 3 && (header.toLowerCase().includes('kelas') || header.toLowerCase().includes('class') || header === 'D')) {
+                                    mappedKey = 'Kelas';
+                                } else if (colIndex === 4 && (header.toLowerCase().includes('link') || header.toLowerCase().includes('url') || header === 'E')) {
+                                    mappedKey = 'Link';
+                                } else if (colIndex === 5 && (header.toLowerCase().includes('deskripsi') || header.toLowerCase().includes('description') || header === 'F')) {
+                                    mappedKey = 'Deskripsi';
+                                }
+                                
+                                obj[mappedKey] = value;
+                                obj[header] = value; // Keep original header too
+                            });
+                            return obj;
+                        }).filter((row, index) => {
+                            // Filter out empty rows
+                            const hasData = Object.values(row).some(value => 
+                                value && value.toString().trim() !== ''
+                            );
+                            
+                            if (!hasData) {
+                                console.log(`🗑️ Filtering out empty LKPD row ${index}`);
+                            }
+                            
+                            return hasData;
+                        });
+                        
+                        console.log(`✅ Berhasil memuat LKPD: ${data.length} records`);
+                        console.log(`📊 Sample LKPD data:`, data.slice(0, 2));
+                        
+                        // Validasi data LKPD
+                        if (data.length > 0) {
+                            const sampleRow = data[0];
+                            console.log(`🔍 LKPD Sample row structure:`, Object.keys(sampleRow));
+                            console.log(`🔍 LKPD Sample row values:`, sampleRow);
+                            
+                            // Cek apakah ada data yang valid
+                            const hasValidData = data.some(row => 
+                                (row.ID || row.Judul || row['Mata Pelajaran'] || row.Link) &&
+                                Object.values(row).some(val => val && val.toString().trim().length > 0)
+                            );
+                            
+                            if (!hasValidData) {
+                                console.warn(`⚠️ LKPD data tidak valid pada percobaan ${attemptCount}`);
+                                continue;
+                            }
+                        }
+                        
+                        return data;
+                        
+                    } catch (error) {
+                        lastError = error;
+                        console.warn(`❌ LKPD Percobaan ${attemptCount} gagal:`, error.message);
+                        continue;
+                    }
+                }
+                
+                throw lastError || new Error(`Semua ${urls.length} percobaan URL gagal untuk LKPD`);
+                
+            } catch (error) {
+                console.error(`💥 Fatal error fetching LKPD:`, error);
+                showNotification(`Gagal memuat LKPD: ${error.message}`, 'error');
                 return [];
             }
         }
@@ -838,10 +1034,14 @@
                                         const judul = l.Judul || l.judul || l.Title || 'N/A';
                                         const mapel = l['Mata Pelajaran'] || l['mata_pelajaran'] || l.MataPelajaran || l.Subject || 'N/A';
                                         const kelas = l.Kelas || l.kelas || l.Class || 'N/A';
-                                        return `ID: ${id} | Judul: ${judul} | Mapel: ${mapel} | Kelas: ${kelas}`;
+                                        const link = l.Link || l.link || 'N/A';
+                                        const deskripsi = (l.Deskripsi || l.deskripsi || 'N/A').substring(0, 30) + '...';
+                                        return `ID: ${id} | Judul: ${judul} | Mapel: ${mapel} | Kelas: ${kelas} | Link: ${link} | Desc: ${deskripsi}`;
                                     }).join('<br>') + (lkpdData.length > 3 ? '<br>... dan ' + (lkpdData.length - 3) + ' lainnya' : '') +
                                     '<br><br><strong>🔍 Struktur kolom LKPD:</strong><br>' + 
-                                    (lkpdData.length > 0 ? Object.keys(lkpdData[0]).join(', ') : 'Tidak ada data')
+                                    (lkpdData.length > 0 ? Object.keys(lkpdData[0]).join(', ') : 'Tidak ada data') +
+                                    '<br><br><strong>🔗 URL LKPD yang digunakan:</strong><br>' +
+                                    `https://docs.google.com/spreadsheets/d/${SHEET_CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&gid=${SHEET_CONFIG.LKPD_GID}`
                                     : '<span class="text-red-600">❌ Tidak ada data LKPD yang dimuat</span>'
                                 }
                             </div>
@@ -1034,72 +1234,60 @@
             }
 
             lkpdList.forEach((lkpd, index) => {
-                // Sesuai dengan struktur kolom yang disebutkan: ID, Judul, Mata Pelajaran, Kelas, Link, Deskripsi
-                const id = lkpd.ID || lkpd.id || lkpd.Id || lkpd['ID'] || `lkpd-${index}`;
-                const judul = lkpd.Judul || lkpd.judul || lkpd.Title || lkpd.title || lkpd['Judul'] || 'LKPD Tanpa Judul';
-                const mataPelajaran = lkpd['Mata Pelajaran'] || lkpd['mata_pelajaran'] || lkpd.MataPelajaran || lkpd.Subject || lkpd.subject || 'Umum';
-                const kelas = lkpd.Kelas || lkpd.kelas || lkpd.Class || lkpd.class || lkpd['Kelas'] || '-';
-                const link = lkpd.Link || lkpd.link || lkpd.URL || lkpd.url || lkpd['Link'] || '';
-                const deskripsi = lkpd.Deskripsi || lkpd.deskripsi || lkpd.Description || lkpd.description || lkpd['Deskripsi'] || 'Tidak ada deskripsi';
+                console.log(`🔍 LKPD ${index + 1} - Raw data:`, lkpd);
+                
+                // Ekstrak data sesuai struktur sheet: ID, Judul, Mata Pelajaran, Kelas, Link, Deskripsi
+                const id = lkpd.ID || lkpd.id || `lkpd-${index + 1}`;
+                const judul = lkpd.Judul || lkpd.judul || 'LKPD Tanpa Judul';
+                const mataPelajaran = lkpd['Mata Pelajaran'] || lkpd.MataPelajaran || lkpd.Subject || 'Umum';
+                const kelas = lkpd.Kelas || lkpd.kelas || '-';
+                const link = lkpd.Link || lkpd.link || '';
+                const deskripsi = lkpd.Deskripsi || lkpd.deskripsi || 'Tidak ada deskripsi';
 
-                console.log(`📝 LKPD ${index + 1}:`, {
-                    id, judul, mataPelajaran, kelas, link, deskripsi,
-                    originalData: lkpd,
-                    availableKeys: Object.keys(lkpd)
+                console.log(`📝 LKPD ${index + 1} extracted:`, {
+                    id, judul, mataPelajaran, kelas, link, deskripsi
                 });
 
-                // Enhanced link validation dengan lebih banyak format dan lebih permisif
+                // Validasi dan normalisasi link
                 let isValidLink = false;
                 let normalizedLink = '';
                 let linkStatus = '';
                 
-                if (link && link.trim() !== '' && link !== '#' && link.toLowerCase() !== 'null' && link.toLowerCase() !== 'undefined') {
+                if (link && link.trim() !== '' && link !== '#' && link.toLowerCase() !== 'null') {
                     const trimmedLink = link.trim();
                     
-                    // Cek berbagai format link dengan validasi yang lebih permisif
                     if (trimmedLink.match(/^https?:\/\/.+/)) {
-                        // Link dengan protokol lengkap
                         normalizedLink = trimmedLink;
                         isValidLink = true;
                         linkStatus = 'Valid HTTP/HTTPS';
                     } else if (trimmedLink.match(/^www\..+/)) {
-                        // Link dengan www (lebih permisif)
                         normalizedLink = 'https://' + trimmedLink;
                         isValidLink = true;
-                        linkStatus = 'Valid WWW (ditambah https)';
+                        linkStatus = 'Valid WWW';
                     } else if (trimmedLink.includes('.') && trimmedLink.length > 3 && !trimmedLink.includes(' ')) {
-                        // Semua yang mengandung titik dan tidak ada spasi (lebih permisif)
                         normalizedLink = 'https://' + trimmedLink;
                         isValidLink = true;
-                        linkStatus = 'Valid domain (ditambah https)';
+                        linkStatus = 'Valid domain';
                     } else if (trimmedLink.startsWith('//')) {
-                        // Protocol-relative URL
                         normalizedLink = 'https:' + trimmedLink;
                         isValidLink = true;
-                        linkStatus = 'Protocol-relative (ditambah https)';
+                        linkStatus = 'Protocol-relative';
                     } else if (trimmedLink.length > 5 && !trimmedLink.includes(' ')) {
-                        // Fallback: jika panjang > 5 dan tidak ada spasi, anggap sebagai link
                         normalizedLink = 'https://' + trimmedLink;
                         isValidLink = true;
-                        linkStatus = 'Kemungkinan link (ditambah https)';
-                    } else {
-                        // Bahkan jika format aneh, tetap coba sebagai link
-                        normalizedLink = trimmedLink.startsWith('http') ? trimmedLink : 'https://' + trimmedLink;
-                        isValidLink = true;
-                        linkStatus = 'Format tidak standar (dicoba tetap)';
+                        linkStatus = 'Kemungkinan link';
                     }
                 } else {
                     linkStatus = 'Link kosong atau tidak valid';
                 }
 
-                console.log(`🔗 Enhanced link validation for LKPD ${index + 1}:`, {
+                console.log(`🔗 Link validation for LKPD ${index + 1}:`, {
                     original: link,
                     normalized: normalizedLink,
                     isValid: isValidLink,
                     status: linkStatus
                 });
 
-                // Create unique button ID untuk menghindari konflik
                 const buttonId = `lkpd-btn-${index}`;
 
                 const card = document.createElement('div');
@@ -1107,49 +1295,66 @@
                 card.innerHTML = `
                     <div class="flex items-start justify-between mb-4">
                         <div class="flex-1">
-                            <h3 class="text-lg font-semibold text-gray-800 mb-2">${judul}</h3>
-                            <p class="text-sm text-gray-600 mb-2">${deskripsi}</p>
-                            <div class="flex items-center space-x-2 text-sm text-gray-500 flex-wrap gap-2">
+                            <div class="flex items-center mb-2">
+                                <span class="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded mr-2">ID: ${id}</span>
+                                <h3 class="text-lg font-semibold text-gray-800">${judul}</h3>
+                            </div>
+                            <p class="text-sm text-gray-600 mb-3">${deskripsi}</p>
+                            <div class="flex items-center space-x-2 text-sm text-gray-500 flex-wrap gap-2 mb-3">
                                 <span class="bg-orange-100 text-orange-800 px-2 py-1 rounded">${mataPelajaran}</span>
                                 <span class="bg-green-100 text-green-800 px-2 py-1 rounded">Kelas ${kelas}</span>
                                 ${isValidLink ? 
-                                    '<span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">✓ Link Tersedia</span>' : 
-                                    '<span class="bg-red-100 text-red-800 px-2 py-1 rounded text-xs">✗ No Link</span>'
+                                    '<span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">✓ Link Aktif</span>' : 
+                                    '<span class="bg-red-100 text-red-800 px-2 py-1 rounded text-xs">✗ Link Tidak Tersedia</span>'
                                 }
                             </div>
-                            ${link && link.trim() !== '' ? `
-                                <div class="mt-2 p-2 bg-gray-50 rounded text-xs">
-                                    <p class="text-gray-600"><strong>Link asli:</strong> ${link}</p>
-                                    ${isValidLink ? `<p class="text-green-600"><strong>Link final:</strong> ${normalizedLink}</p>` : ''}
-                                    <p class="text-blue-600"><strong>Status:</strong> ${linkStatus}</p>
+                            ${isValidLink ? `
+                                <div class="mt-2 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                                    <p class="text-xs text-blue-600 font-medium mb-1">🔗 Link LKPD:</p>
+                                    <a href="${normalizedLink}" target="_blank" rel="noopener noreferrer" 
+                                       class="text-xs text-blue-700 hover:text-blue-900 break-all underline">
+                                        ${normalizedLink}
+                                    </a>
+                                    <p class="text-xs text-green-600 mt-1">Status: ${linkStatus}</p>
                                 </div>
-                            ` : ''}
+                            ` : `
+                                <div class="mt-2 p-3 bg-red-50 rounded-lg border border-red-200">
+                                    <p class="text-xs text-red-600 font-medium">❌ Link tidak tersedia atau tidak valid</p>
+                                    ${link ? `<p class="text-xs text-gray-500 mt-1">Link asli: ${link}</p>` : ''}
+                                </div>
+                            `}
                         </div>
-                        <div class="ml-4">📝</div>
+                        <div class="ml-4 text-2xl">📝</div>
                     </div>
-                    <button id="${buttonId}" 
-                            data-lkpd-id="${id}"
-                            data-lkpd-title="${judul}"
-                            data-lkpd-link="${normalizedLink}"
-                            data-lkpd-subject="${mataPelajaran}"
-                            class="w-full py-2 px-4 rounded-lg transition-colors font-medium ${isValidLink ? 'bg-orange-600 text-white hover:bg-orange-700 active:bg-orange-800' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}"
-                            ${!isValidLink ? 'disabled' : ''}>
-                        ${isValidLink ? 'Kerjakan LKPD' : 'Link Tidak Tersedia'}
-                    </button>
+                    
                     ${isValidLink ? `
-                        <button onclick="testLKPDLink('${normalizedLink}', '${judul}')" 
-                                class="w-full mt-2 py-1 px-4 rounded text-xs bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors">
-                            🔗 Test Link
+                        <div class="space-y-2">
+                            <button id="${buttonId}" 
+                                    data-lkpd-id="${id}"
+                                    data-lkpd-title="${judul}"
+                                    data-lkpd-link="${normalizedLink}"
+                                    data-lkpd-subject="${mataPelajaran}"
+                                    class="w-full bg-orange-600 text-white py-3 px-4 rounded-lg hover:bg-orange-700 active:bg-orange-800 transition-colors font-medium">
+                                🚀 Kerjakan LKPD
+                            </button>
+                            <button onclick="window.open('${normalizedLink}', '_blank', 'noopener,noreferrer')" 
+                                    class="w-full py-2 px-4 rounded-lg text-sm bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors">
+                                🔗 Buka Link Langsung
+                            </button>
+                        </div>
+                    ` : `
+                        <button disabled 
+                                class="w-full bg-gray-300 text-gray-500 py-3 px-4 rounded-lg cursor-not-allowed font-medium">
+                            ❌ Link Tidak Tersedia
                         </button>
-                    ` : ''}
+                    `}
                 `;
                 container.appendChild(card);
 
-                // Add event listener dengan multiple fallback methods
+                // Add event listener untuk button utama jika link valid
                 if (isValidLink) {
                     const button = document.getElementById(buttonId);
                     if (button) {
-                        // Method 1: addEventListener
                         button.addEventListener('click', function(e) {
                             e.preventDefault();
                             e.stopPropagation();
@@ -1157,30 +1362,12 @@
                             accessLKPD(id, judul, normalizedLink, mataPelajaran);
                         });
 
-                        // Method 2: onclick as backup
-                        button.onclick = function(e) {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            console.log(`🖱️ Button onclick for LKPD: ${judul}`);
-                            accessLKPD(id, judul, normalizedLink, mataPelajaran);
-                        };
-
-                        // Method 3: Touch events for mobile
-                        button.addEventListener('touchend', function(e) {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            console.log(`📱 Button touch for LKPD: ${judul}`);
-                            accessLKPD(id, judul, normalizedLink, mataPelajaran);
-                        });
-
-                        console.log(`✅ Event listeners added for button: ${buttonId}`);
-                    } else {
-                        console.error(`❌ Button not found: ${buttonId}`);
+                        console.log(`✅ Event listener added for button: ${buttonId}`);
                     }
                 }
             });
 
-            // Add global click handler as additional fallback
+            // Global click handler untuk fallback
             container.addEventListener('click', function(e) {
                 const button = e.target.closest('button[data-lkpd-id]');
                 if (button && !button.disabled) {
@@ -1682,5 +1869,5 @@
             activeTab.classList.remove('text-gray-500', 'hover:text-gray-700');
         }
     </script>
- <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'98f073d3d205fd2a',t:'MTc2MDU0MzIyMC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'98f0937331019d0c',t:'MTc2MDU0NDUxNS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
