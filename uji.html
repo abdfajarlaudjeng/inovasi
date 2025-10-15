@@ -61,6 +61,12 @@
         .notification.error {
             background-color: #ef4444;
         }
+        .notification.info {
+            background-color: #3b82f6;
+        }
+        .notification.warning {
+            background-color: #f59e0b;
+        }
         .modal-overlay {
             background-color: rgba(0, 0, 0, 0.5);
             backdrop-filter: blur(4px);
@@ -1002,34 +1008,52 @@
                     availableKeys: Object.keys(lkpd)
                 });
 
-                // Validasi dan normalisasi link dengan lebih fleksibel
+                // Enhanced link validation dengan lebih banyak format
                 let isValidLink = false;
                 let normalizedLink = '';
+                let linkStatus = '';
                 
-                if (link && link.trim() !== '' && link !== '#') {
+                if (link && link.trim() !== '' && link !== '#' && link.toLowerCase() !== 'null' && link.toLowerCase() !== 'undefined') {
                     const trimmedLink = link.trim();
                     
-                    // Cek berbagai format link
-                    if (trimmedLink.startsWith('http://') || trimmedLink.startsWith('https://')) {
+                    // Cek berbagai format link dengan validasi yang lebih ketat
+                    if (trimmedLink.match(/^https?:\/\/.+/)) {
+                        // Link dengan protokol lengkap
                         normalizedLink = trimmedLink;
                         isValidLink = true;
-                    } else if (trimmedLink.startsWith('www.')) {
+                        linkStatus = 'Valid HTTP/HTTPS';
+                    } else if (trimmedLink.match(/^www\..+\..+/)) {
+                        // Link dengan www
                         normalizedLink = 'https://' + trimmedLink;
                         isValidLink = true;
-                    } else if (trimmedLink.includes('.') && !trimmedLink.includes(' ')) {
-                        // Kemungkinan domain tanpa protokol
+                        linkStatus = 'Valid WWW (ditambah https)';
+                    } else if (trimmedLink.match(/^[a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]\.[a-zA-Z]{2,}/) && !trimmedLink.includes(' ')) {
+                        // Domain tanpa protokol (format domain yang valid)
                         normalizedLink = 'https://' + trimmedLink;
                         isValidLink = true;
+                        linkStatus = 'Valid domain (ditambah https)';
                     } else if (trimmedLink.startsWith('//')) {
+                        // Protocol-relative URL
                         normalizedLink = 'https:' + trimmedLink;
                         isValidLink = true;
+                        linkStatus = 'Protocol-relative (ditambah https)';
+                    } else if (trimmedLink.match(/^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/) && !trimmedLink.includes(' ')) {
+                        // Kemungkinan domain sederhana
+                        normalizedLink = 'https://' + trimmedLink;
+                        isValidLink = true;
+                        linkStatus = 'Kemungkinan domain (ditambah https)';
+                    } else {
+                        linkStatus = 'Format tidak dikenali';
                     }
+                } else {
+                    linkStatus = 'Link kosong atau tidak valid';
                 }
 
-                console.log(`🔗 Link validation for LKPD ${index + 1}:`, {
+                console.log(`🔗 Enhanced link validation for LKPD ${index + 1}:`, {
                     original: link,
                     normalized: normalizedLink,
-                    isValid: isValidLink
+                    isValid: isValidLink,
+                    status: linkStatus
                 });
 
                 // Create unique button ID untuk menghindari konflik
@@ -1050,26 +1074,83 @@
                                     '<span class="bg-red-100 text-red-800 px-2 py-1 rounded text-xs">✗ No Link</span>'
                                 }
                             </div>
-                            ${!isValidLink && link ? `<p class="text-xs text-red-500 mt-2">Link asli: ${link}</p>` : ''}
+                            ${link && link.trim() !== '' ? `
+                                <div class="mt-2 p-2 bg-gray-50 rounded text-xs">
+                                    <p class="text-gray-600"><strong>Link asli:</strong> ${link}</p>
+                                    ${isValidLink ? `<p class="text-green-600"><strong>Link final:</strong> ${normalizedLink}</p>` : ''}
+                                    <p class="text-blue-600"><strong>Status:</strong> ${linkStatus}</p>
+                                </div>
+                            ` : ''}
                         </div>
                         <div class="ml-4">📝</div>
                     </div>
                     <button id="${buttonId}" 
-                            class="w-full py-2 px-4 rounded-lg transition-colors font-medium ${isValidLink ? 'bg-orange-600 text-white hover:bg-orange-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}"
+                            data-lkpd-id="${id}"
+                            data-lkpd-title="${judul}"
+                            data-lkpd-link="${normalizedLink}"
+                            data-lkpd-subject="${mataPelajaran}"
+                            class="w-full py-2 px-4 rounded-lg transition-colors font-medium ${isValidLink ? 'bg-orange-600 text-white hover:bg-orange-700 active:bg-orange-800' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}"
                             ${!isValidLink ? 'disabled' : ''}>
                         ${isValidLink ? 'Kerjakan LKPD' : 'Link Tidak Tersedia'}
                     </button>
+                    ${isValidLink ? `
+                        <button onclick="testLKPDLink('${normalizedLink}', '${judul}')" 
+                                class="w-full mt-2 py-1 px-4 rounded text-xs bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors">
+                            🔗 Test Link
+                        </button>
+                    ` : ''}
                 `;
                 container.appendChild(card);
 
-                // Add event listener setelah element ditambahkan ke DOM
+                // Add event listener dengan multiple fallback methods
                 if (isValidLink) {
                     const button = document.getElementById(buttonId);
                     if (button) {
-                        button.addEventListener('click', function() {
+                        // Method 1: addEventListener
+                        button.addEventListener('click', function(e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            console.log(`🖱️ Button clicked for LKPD: ${judul}`);
                             accessLKPD(id, judul, normalizedLink, mataPelajaran);
                         });
+
+                        // Method 2: onclick as backup
+                        button.onclick = function(e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            console.log(`🖱️ Button onclick for LKPD: ${judul}`);
+                            accessLKPD(id, judul, normalizedLink, mataPelajaran);
+                        };
+
+                        // Method 3: Touch events for mobile
+                        button.addEventListener('touchend', function(e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            console.log(`📱 Button touch for LKPD: ${judul}`);
+                            accessLKPD(id, judul, normalizedLink, mataPelajaran);
+                        });
+
+                        console.log(`✅ Event listeners added for button: ${buttonId}`);
+                    } else {
+                        console.error(`❌ Button not found: ${buttonId}`);
                     }
+                }
+            });
+
+            // Add global click handler as additional fallback
+            container.addEventListener('click', function(e) {
+                const button = e.target.closest('button[data-lkpd-id]');
+                if (button && !button.disabled) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    
+                    const id = button.getAttribute('data-lkpd-id');
+                    const title = button.getAttribute('data-lkpd-title');
+                    const link = button.getAttribute('data-lkpd-link');
+                    const subject = button.getAttribute('data-lkpd-subject');
+                    
+                    console.log(`🎯 Global click handler for LKPD: ${title}`);
+                    accessLKPD(id, title, link, subject);
                 }
             });
         }
@@ -1093,39 +1174,154 @@
         }
 
         async function accessLKPD(lkpdId, title, link, subject) {
+            console.log(`🚀 accessLKPD called with:`, { lkpdId, title, link, subject });
+            
             // Validasi link sebelum membuka
             if (!link || link === '#' || link.trim() === '') {
                 showNotification('Link LKPD tidak tersedia atau tidak valid', 'error');
+                console.error('❌ Invalid link:', link);
                 return;
             }
 
-            // Normalisasi link jika diperlukan
-            let normalizedLink = link;
-            if (link.startsWith('www.')) {
-                normalizedLink = 'https://' + link;
+            // Enhanced normalisasi link
+            let normalizedLink = link.trim();
+            
+            // Jika link tidak dimulai dengan protokol, tambahkan https://
+            if (!normalizedLink.match(/^https?:\/\//)) {
+                if (normalizedLink.startsWith('www.')) {
+                    normalizedLink = 'https://' + normalizedLink;
+                } else if (normalizedLink.includes('.') && !normalizedLink.includes(' ')) {
+                    normalizedLink = 'https://' + normalizedLink;
+                }
             }
 
+            console.log(`🔗 Final normalized link: ${normalizedLink}`);
+
+            // Simpan progress jika user adalah siswa
             if (currentUser && currentUser.type === 'student') {
-                await saveProgress({
-                    student_id: currentUser.id,
-                    student_name: currentUser.name,
-                    class_grade: currentUser.class,
-                    subject: subject,
-                    material_id: lkpdId,
-                    material_title: title,
-                    progress_type: 'lkpd_access',
-                    progress_value: 1,
-                    session_duration: 0
-                });
+                try {
+                    await saveProgress({
+                        student_id: currentUser.id,
+                        student_name: currentUser.name,
+                        class_grade: currentUser.class,
+                        subject: subject,
+                        material_id: lkpdId,
+                        material_title: title,
+                        progress_type: 'lkpd_access',
+                        progress_value: 1,
+                        session_duration: 0
+                    });
+                    console.log('✅ Progress saved successfully');
+                } catch (progressError) {
+                    console.warn('⚠️ Failed to save progress:', progressError);
+                    // Continue with opening link even if progress save fails
+                }
             }
             
+            // Buka link dengan multiple fallback methods
             try {
-                window.open(normalizedLink, '_blank', 'noopener,noreferrer');
-                showNotification(`Membuka LKPD: ${title}`);
+                console.log(`🌐 Attempting to open: ${normalizedLink}`);
+                
+                // Method 1: window.open dengan parameter lengkap
+                const newWindow = window.open(normalizedLink, '_blank', 'noopener,noreferrer,width=1200,height=800');
+                
+                if (newWindow) {
+                    console.log('✅ Link opened successfully with window.open');
+                    showNotification(`Membuka LKPD: ${title}`);
+                } else {
+                    // Method 2: Fallback jika popup diblokir
+                    console.warn('⚠️ Popup blocked, trying alternative method');
+                    
+                    // Buat link temporary dan klik
+                    const tempLink = document.createElement('a');
+                    tempLink.href = normalizedLink;
+                    tempLink.target = '_blank';
+                    tempLink.rel = 'noopener noreferrer';
+                    tempLink.style.display = 'none';
+                    document.body.appendChild(tempLink);
+                    tempLink.click();
+                    document.body.removeChild(tempLink);
+                    
+                    console.log('✅ Link opened with temporary anchor method');
+                    showNotification(`Membuka LKPD: ${title} (popup mungkin diblokir)`);
+                }
+                
             } catch (error) {
-                showNotification('Gagal membuka LKPD. Periksa link atau coba lagi.', 'error');
-                console.error('Error opening LKPD:', error);
+                console.error('❌ Error opening LKPD:', error);
+                showNotification(`Gagal membuka LKPD: ${error.message}`, 'error');
+                
+                // Method 3: Last resort - show link to user
+                showLinkFallback(normalizedLink, title);
             }
+        }
+
+        function testLKPDLink(link, title) {
+            console.log(`🧪 Testing LKPD link: ${link}`);
+            
+            // Show loading state
+            showNotification('Menguji koneksi link...', 'info');
+            
+            // Test dengan fetch (untuk melihat apakah link accessible)
+            fetch(link, { 
+                method: 'HEAD', 
+                mode: 'no-cors',
+                cache: 'no-cache'
+            })
+            .then(() => {
+                console.log('✅ Link test successful');
+                showNotification(`Link ${title} dapat diakses`, 'success');
+                
+                // Langsung buka link setelah test berhasil
+                setTimeout(() => {
+                    window.open(link, '_blank', 'noopener,noreferrer');
+                }, 1000);
+            })
+            .catch((error) => {
+                console.warn('⚠️ Link test failed (might be CORS):', error);
+                showNotification(`Test link gagal (mungkin CORS), mencoba buka langsung...`, 'warning');
+                
+                // Tetap coba buka meskipun test gagal (karena CORS)
+                setTimeout(() => {
+                    window.open(link, '_blank', 'noopener,noreferrer');
+                }, 1000);
+            });
+        }
+
+        function showLinkFallback(link, title) {
+            // Buat modal dengan link yang bisa diklik manual
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4';
+            modal.innerHTML = `
+                <div class="bg-white rounded-lg max-w-md w-full p-6">
+                    <h3 class="text-lg font-bold mb-4">🔗 Link LKPD</h3>
+                    <p class="text-gray-600 mb-4">Silakan klik link di bawah untuk membuka LKPD:</p>
+                    <div class="mb-4">
+                        <p class="font-semibold text-gray-800 mb-2">${title}</p>
+                        <a href="${link}" target="_blank" rel="noopener noreferrer" 
+                           class="block w-full p-3 bg-blue-50 border border-blue-200 rounded text-blue-600 hover:bg-blue-100 transition-colors break-all">
+                            ${link}
+                        </a>
+                    </div>
+                    <div class="flex space-x-2">
+                        <button onclick="window.open('${link}', '_blank'); this.closest('.fixed').remove();" 
+                                class="flex-1 bg-orange-600 text-white py-2 px-4 rounded hover:bg-orange-700">
+                            Buka Link
+                        </button>
+                        <button onclick="this.closest('.fixed').remove()" 
+                                class="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded hover:bg-gray-400">
+                            Tutup
+                        </button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            
+            // Auto remove after 30 seconds
+            setTimeout(() => {
+                if (document.body.contains(modal)) {
+                    document.body.removeChild(modal);
+                }
+            }, 30000);
         }
 
         function updateStudentProgress() {
@@ -1440,5 +1636,5 @@
             activeTab.classList.remove('text-gray-500', 'hover:text-gray-700');
         }
     </script>
- <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'98f00d8364f73d86',t:'MTc2MDUzOTAyOS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'98f0157143fc3d86',t:'MTc2MDUzOTM1NC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
