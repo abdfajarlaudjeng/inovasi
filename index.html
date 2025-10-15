@@ -229,42 +229,166 @@
             const userType = formData.get('userType');
             const identifier = formData.get('identifier');
 
+            // Validasi input
+            if (!userType) {
+                showNotification('Pilih jenis pengguna terlebih dahulu!', 'error');
+                return;
+            }
+
+            if (!identifier || identifier.trim() === '') {
+                showNotification('Masukkan ID pengguna!', 'error');
+                return;
+            }
+
             showLoading(true);
 
             try {
+                // Cek apakah data sudah dimuat
+                if (userType === 'student' && studentsData.length === 0) {
+                    showNotification('Data siswa belum dimuat. Coba refresh halaman.', 'error');
+                    showLoading(false);
+                    return;
+                }
+
+                if (userType === 'teacher' && teachersData.length === 0) {
+                    showNotification('Data guru belum dimuat. Coba refresh halaman.', 'error');
+                    showLoading(false);
+                    return;
+                }
+
                 let user = null;
+                let errorMessage = '';
                 
                 if (userType === 'student') {
-                    user = studentsData.find(s => s.NISN === identifier);
+                    user = studentsData.find(s => s.NISN && s.NISN.toString() === identifier.toString());
                     if (user) {
                         user.type = 'student';
                         user.id = user.NISN;
                         user.name = user.Nama;
                         user.class = user.Kelas;
+                    } else {
+                        // Cek apakah ada data siswa yang mirip
+                        const similarStudents = studentsData.filter(s => 
+                            s.NISN && s.NISN.toString().includes(identifier)
+                        );
+                        
+                        if (similarStudents.length > 0) {
+                            errorMessage = `NISN "${identifier}" tidak ditemukan. Mungkin maksud Anda: ${similarStudents.slice(0, 3).map(s => s.NISN).join(', ')}`;
+                        } else {
+                            errorMessage = `NISN "${identifier}" tidak terdaftar. Pastikan NISN sudah benar dan terdaftar di Google Sheets.`;
+                        }
                     }
                 } else if (userType === 'teacher') {
-                    user = teachersData.find(t => t.NIP === identifier);
+                    user = teachersData.find(t => t.NIP && t.NIP.toString() === identifier.toString());
                     if (user) {
                         user.type = 'teacher';
                         user.id = user.NIP;
                         user.name = user.Nama;
                         user.subject = user['Mata Pelajaran'];
+                    } else {
+                        // Cek apakah ada data guru yang mirip
+                        const similarTeachers = teachersData.filter(t => 
+                            t.NIP && t.NIP.toString().includes(identifier)
+                        );
+                        
+                        if (similarTeachers.length > 0) {
+                            errorMessage = `NIP "${identifier}" tidak ditemukan. Mungkin maksud Anda: ${similarTeachers.slice(0, 3).map(t => t.NIP).join(', ')}`;
+                        } else {
+                            errorMessage = `NIP "${identifier}" tidak terdaftar. Pastikan NIP sudah benar dan terdaftar di Google Sheets.`;
+                        }
                     }
                 }
 
                 if (user) {
                     currentUser = user;
-                    hideLoginModal();
                     showDashboard();
                     showNotification(`Selamat datang, ${user.name}!`);
                 } else {
-                    showNotification('ID tidak ditemukan. Periksa kembali data Anda.', 'error');
+                    showNotification(errorMessage, 'error');
+                    showLoginHelp();
                 }
             } catch (error) {
-                showNotification('Gagal melakukan login', 'error');
+                console.error('Login error:', error);
+                showNotification('Terjadi kesalahan saat login. Coba lagi dalam beberapa saat.', 'error');
             } finally {
                 showLoading(false);
             }
+        }
+
+        function showLoginHelp() {
+            const helpDiv = document.getElementById('login-help');
+            if (helpDiv) {
+                helpDiv.classList.remove('hidden');
+                setTimeout(() => {
+                    helpDiv.classList.add('hidden');
+                }, 10000); // Hide after 10 seconds
+            }
+        }
+
+        function showDebugInfo() {
+            const debugModal = document.createElement('div');
+            debugModal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4';
+            debugModal.innerHTML = `
+                <div class="bg-white rounded-lg max-w-4xl w-full max-h-96 overflow-y-auto p-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-bold">Debug Info - Data yang Dimuat</h3>
+                        <button onclick="this.closest('.fixed').remove()" class="text-gray-500 hover:text-gray-700">✕</button>
+                    </div>
+                    
+                    <div class="space-y-4">
+                        <div>
+                            <h4 class="font-semibold text-blue-600">📊 Status Koneksi Google Sheets:</h4>
+                            <p class="text-sm ${studentsData.length > 0 || teachersData.length > 0 ? 'text-green-600' : 'text-red-600'}">
+                                ${studentsData.length > 0 || teachersData.length > 0 ? '✅ Berhasil terhubung' : '❌ Gagal terhubung'}
+                            </p>
+                        </div>
+
+                        <div>
+                            <h4 class="font-semibold text-blue-600">👥 Data Siswa (${studentsData.length} records):</h4>
+                            <div class="bg-gray-50 p-3 rounded text-xs max-h-32 overflow-y-auto">
+                                ${studentsData.length > 0 ? 
+                                    studentsData.slice(0, 5).map(s => 
+                                        `NISN: ${s.NISN || 'N/A'} | Nama: ${s.Nama || 'N/A'} | Kelas: ${s.Kelas || 'N/A'}`
+                                    ).join('<br>') + (studentsData.length > 5 ? '<br>... dan ' + (studentsData.length - 5) + ' lainnya' : '')
+                                    : 'Tidak ada data siswa yang dimuat'
+                                }
+                            </div>
+                        </div>
+
+                        <div>
+                            <h4 class="font-semibold text-blue-600">👨‍🏫 Data Guru (${teachersData.length} records):</h4>
+                            <div class="bg-gray-50 p-3 rounded text-xs max-h-32 overflow-y-auto">
+                                ${teachersData.length > 0 ? 
+                                    teachersData.slice(0, 5).map(t => 
+                                        `NIP: ${t.NIP || 'N/A'} | Nama: ${t.Nama || 'N/A'} | Mapel: ${t['Mata Pelajaran'] || 'N/A'}`
+                                    ).join('<br>') + (teachersData.length > 5 ? '<br>... dan ' + (teachersData.length - 5) + ' lainnya' : '')
+                                    : 'Tidak ada data guru yang dimuat'
+                                }
+                            </div>
+                        </div>
+
+                        <div>
+                            <h4 class="font-semibold text-blue-600">📚 Data Materi (${materialsData.length} records):</h4>
+                            <div class="bg-gray-50 p-3 rounded text-xs max-h-32 overflow-y-auto">
+                                ${materialsData.length > 0 ? 
+                                    materialsData.slice(0, 3).map(m => 
+                                        `ID: ${m.ID || 'N/A'} | Judul: ${m.Judul || 'N/A'} | Kelas: ${m.Kelas || 'N/A'}`
+                                    ).join('<br>') + (materialsData.length > 3 ? '<br>... dan ' + (materialsData.length - 3) + ' lainnya' : '')
+                                    : 'Tidak ada data materi yang dimuat'
+                                }
+                            </div>
+                        </div>
+
+                        <div class="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded">
+                            <p class="text-sm text-yellow-800">
+                                <strong>💡 Tips:</strong> Jika data kosong, pastikan Google Sheets sudah diatur "Anyone with link can view" 
+                                dan nama sheet sesuai: DataSiswa, DataGuru, MateriPelajaran, LKPD
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(debugModal);
         }
 
         function logout() {
@@ -622,13 +746,37 @@
       </div><button type="submit" class="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 transition-colors font-medium">
        <div class="loading-indicator hidden items-center justify-center">
         <div class="loading-spinner mr-2"></div> Memuat...
-       </div><span class="login-text">Masuk</span> </button>
+       </div><span class="login-text">Masuk</span> </button> <!-- Debug Button --> <button type="button" onclick="showDebugInfo()" class="w-full mt-2 bg-gray-500 text-white py-2 px-4 rounded-lg hover:bg-gray-600 transition-colors text-sm"> 🔍 Lihat Data yang Dimuat </button>
      </form>
      <div class="mt-6 p-4 bg-gray-50 rounded-lg">
-      <h3 class="font-semibold text-gray-800 mb-2">Contoh ID:</h3>
-      <div class="text-sm text-gray-600 space-y-1">
-       <p><strong>Siswa:</strong> 2024001, 2024002, 2024003</p>
-       <p><strong>Guru:</strong> 196801011990031001</p>
+      <h3 class="font-semibold text-gray-800 mb-2">Petunjuk Login:</h3>
+      <div class="text-sm text-gray-600 space-y-2">
+       <div>
+        <p><strong>Siswa:</strong> Gunakan NISN (Nomor Induk Siswa Nasional)</p>
+        <p class="text-xs text-gray-500">Contoh: 2024001, 2024002, 2024003</p>
+       </div>
+       <div>
+        <p><strong>Guru:</strong> Gunakan NIP (Nomor Induk Pegawai)</p>
+        <p class="text-xs text-gray-500">Contoh: 196801011990031001</p>
+       </div>
+       <div class="mt-3 p-2 bg-blue-50 rounded border-l-4 border-blue-400">
+        <p class="text-xs text-blue-700"><strong>Catatan:</strong> Pastikan data Anda sudah terdaftar di Google Sheets dan dapat diakses publik.</p>
+       </div>
+      </div>
+     </div><!-- Login Help (Hidden by default) -->
+     <div id="login-help" class="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg hidden">
+      <h4 class="font-semibold text-red-800 mb-2">❌ Gagal Login?</h4>
+      <div class="text-sm text-red-700 space-y-2">
+       <p><strong>Kemungkinan penyebab:</strong></p>
+       <ul class="list-disc list-inside space-y-1 ml-2">
+        <li>ID belum terdaftar di Google Sheets</li>
+        <li>Google Sheets belum diatur sebagai "Anyone with link can view"</li>
+        <li>Nama sheet tidak sesuai (harus: DataSiswa, DataGuru)</li>
+        <li>Kolom di sheet tidak sesuai format</li>
+       </ul>
+       <div class="mt-3 p-2 bg-yellow-50 border border-yellow-200 rounded">
+        <p class="text-xs text-yellow-800"><strong>Solusi:</strong> Hubungi administrator untuk memastikan data Anda sudah terdaftar dengan benar.</p>
+       </div>
       </div>
      </div>
     </div>
@@ -712,5 +860,5 @@
             activeTab.classList.remove('text-gray-500', 'hover:text-gray-700');
         }
     </script>
- <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'98efcf8264ca91b4',t:'MTc2MDUzNjQ4OS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'98efd43b225291b4',t:'MTc2MDUzNjY4My4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
