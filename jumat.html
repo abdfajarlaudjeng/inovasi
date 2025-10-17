@@ -1,221 +1,206 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Platform Pembelajaran Informatika</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background-color: #f3f4f6; }
+    .hidden { display: none; }
+    .card { background: white; border-radius: 1rem; padding: 2rem; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+  </style>
 </head>
-<body class="bg-gray-100 text-gray-800">
-  <div class="max-w-6xl mx-auto p-6">
-    <header class="mb-6 text-center">
-      <h1 class="text-2xl font-bold text-indigo-700">Platform Pembelajaran Informatika</h1>
-      <p class="text-sm text-gray-600">Sistem terintegrasi dengan Google Spreadsheet (Guru & Siswa)</p>
-    </header>
+<body class="min-h-screen flex flex-col items-center justify-center">
 
-    <!-- LOGIN SECTION -->
-    <div id="loginSection" class="bg-white p-6 rounded shadow mb-6">
-      <h2 class="font-semibold text-lg mb-3 text-center">Login Sistem</h2>
-      <form id="loginForm" class="grid gap-3 md:grid-cols-2">
-        <select name="role" class="border p-2 rounded" required>
+  <!-- Login Form -->
+  <div id="loginPage" class="card w-full max-w-md">
+    <h1 class="text-2xl font-bold text-center mb-4 text-blue-700">Login Sistem Pembelajaran</h1>
+    <p class="text-center text-gray-600 mb-6">Masukkan Email dan NISN/NIP Anda</p>
+
+    <form id="loginForm" class="space-y-4">
+      <div>
+        <label class="block font-semibold mb-1">Peran</label>
+        <select id="role" class="w-full p-2 border rounded">
           <option value="siswa">Siswa</option>
           <option value="guru">Guru</option>
         </select>
-        <input name="id" placeholder="NISN (Siswa) / NIP (Guru)" required class="border p-2 rounded" />
-        <input name="email" type="email" placeholder="Email Terdaftar" required class="border p-2 rounded md:col-span-2" />
-        <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white p-2 rounded md:col-span-2">Login</button>
-      </form>
-      <p id="loginMessage" class="text-center text-sm mt-3"></p>
+      </div>
+      <div>
+        <label class="block font-semibold mb-1">Email</label>
+        <input type="email" id="email" class="w-full p-2 border rounded" placeholder="email@example.com" required>
+      </div>
+      <div>
+        <label class="block font-semibold mb-1">NISN / NIP</label>
+        <input type="text" id="identifier" class="w-full p-2 border rounded" placeholder="Masukkan NISN atau NIP" required>
+      </div>
+      <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded font-semibold">Login</button>
+    </form>
+
+    <p id="loginError" class="text-red-600 mt-3 text-center hidden">Login gagal. Periksa data Anda.</p>
+  </div>
+
+  <!-- Dashboard -->
+  <div id="dashboardPage" class="hidden w-full max-w-2xl card">
+    <h2 class="text-xl font-bold text-blue-700 mb-4">Dashboard Pembelajaran</h2>
+
+    <div class="bg-gray-100 p-4 rounded mb-4">
+      <p><strong>Nama:</strong> <span id="userName"></span></p>
+      <p><strong>Kelas:</strong> <span id="userClass"></span></p>
+      <p><strong>Email:</strong> <span id="userEmail"></span></p>
+      <p><strong>Peran:</strong> <span id="userRole"></span></p>
     </div>
 
-    <!-- DASHBOARD SECTION -->
-    <section id="dashboardSection" class="hidden grid grid-cols-1 md:grid-cols-3 gap-4">
-      <!-- Data Siswa -->
-      <div class="col-span-1 md:col-span-2 bg-white p-4 rounded shadow">
-        <div class="flex justify-between items-center mb-3">
-          <h2 class="font-semibold text-lg text-gray-700">Data Siswa</h2>
-          <button id="logoutBtn" class="bg-red-500 text-white px-3 py-1 rounded text-sm">Logout</button>
-        </div>
-        <div class="flex gap-2 mb-3">
-          <input id="filterKelas" type="text" placeholder="Filter kelas (opsional)" class="border p-2 rounded flex-1" />
-          <button id="btnLoadStudents" class="bg-indigo-600 text-white px-4 py-2 rounded">Muat Siswa</button>
-        </div>
-        <div id="studentsContainer" class="overflow-auto max-h-96"></div>
+    <hr class="my-4">
+
+    <!-- Form Progress -->
+    <h3 class="text-lg font-semibold mb-2 text-blue-600">Update Progress Materi</h3>
+    <form id="progressForm" class="space-y-3">
+      <input type="hidden" id="progressNISN">
+      <input type="hidden" id="progressKelas">
+      <div>
+        <label class="block font-semibold">Nama Materi / LKPD</label>
+        <input type="text" id="materialName" class="w-full p-2 border rounded" required>
       </div>
-
-      <!-- Form Aksi -->
-      <div class="bg-white p-4 rounded shadow">
-        <h2 class="font-medium mb-4 text-gray-700">Aksi Cepat</h2>
-        <div class="space-y-4">
-          <!-- Progress -->
-          <div>
-            <h3 class="text-sm font-semibold mb-1 text-gray-600">Update Progress Materi</h3>
-            <form id="formUpdateProgress" class="space-y-2">
-              <input name="nisn" placeholder="NISN" required class="w-full border p-2 rounded" />
-              <input name="materialId" placeholder="Material ID" required class="w-full border p-2 rounded" />
-              <input name="materialName" placeholder="Nama Materi" required class="w-full border p-2 rounded" />
-              <input name="kelas" placeholder="Kelas" class="w-full border p-2 rounded" />
-              <button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white p-2 rounded">Simpan Progress</button>
-            </form>
-          </div>
-
-          <!-- Kuis -->
-          <div>
-            <h3 class="text-sm font-semibold mb-1 text-gray-600">Submit Kuis</h3>
-            <form id="formSubmitQuiz" class="space-y-2">
-              <input name="nisn" placeholder="NISN" required class="w-full border p-2 rounded" />
-              <input name="quizId" placeholder="Quiz ID" required class="w-full border p-2 rounded" />
-              <input name="quizName" placeholder="Nama Kuis" required class="w-full border p-2 rounded" />
-              <input name="kelas" placeholder="Kelas" class="w-full border p-2 rounded" />
-              <input name="score" placeholder="Nilai" class="w-full border p-2 rounded" />
-              <input name="correct" placeholder="Benar" class="w-full border p-2 rounded" />
-              <input name="total" placeholder="Total Soal" class="w-full border p-2 rounded" />
-              <input name="duration" placeholder="Durasi (menit)" class="w-full border p-2 rounded" />
-              <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white p-2 rounded">Kirim Hasil Kuis</button>
-            </form>
-          </div>
-
-          <!-- Tugas -->
-          <div>
-            <h3 class="text-sm font-semibold mb-1 text-gray-600">Submit Tugas</h3>
-            <form id="formSubmitAssignment" class="space-y-2">
-              <input name="nisn" placeholder="NISN" required class="w-full border p-2 rounded" />
-              <input name="assignmentId" placeholder="Tugas ID" required class="w-full border p-2 rounded" />
-              <input name="assignmentName" placeholder="Nama Tugas" required class="w-full border p-2 rounded" />
-              <input name="kelas" placeholder="Kelas" class="w-full border p-2 rounded" />
-              <input name="answer1" placeholder="Jawaban 1" class="w-full border p-2 rounded" />
-              <input name="answer2" placeholder="Jawaban 2" class="w-full border p-2 rounded" />
-              <input name="answer3" placeholder="Jawaban 3" class="w-full border p-2 rounded" />
-              <button type="submit" class="w-full bg-yellow-600 hover:bg-yellow-700 text-white p-2 rounded">Kirim Tugas</button>
-            </form>
-          </div>
-
-          <!-- Absensi -->
-          <div>
-            <h3 class="text-sm font-semibold mb-1 text-gray-600">Catat Absensi</h3>
-            <form id="formAttendance" class="space-y-2">
-              <input name="nisn" placeholder="NISN" required class="w-full border p-2 rounded" />
-              <input name="nama" placeholder="Nama" required class="w-full border p-2 rounded" />
-              <input name="kelas" placeholder="Kelas" class="w-full border p-2 rounded" />
-              <input name="topic" placeholder="Topik / Materi" class="w-full border p-2 rounded" />
-              <input name="notes" placeholder="Catatan" class="w-full border p-2 rounded" />
-              <button type="submit" class="w-full bg-pink-600 hover:bg-pink-700 text-white p-2 rounded">Simpan Absensi</button>
-            </form>
-          </div>
-        </div>
+      <div>
+        <label class="block font-semibold">Jenis</label>
+        <select id="materialType" class="w-full p-2 border rounded">
+          <option value="Materi">Materi</option>
+          <option value="LKPD">LKPD</option>
+        </select>
       </div>
-    </section>
+      <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded font-semibold">Simpan Progress</button>
+    </form>
 
-    <footer class="mt-6 text-center text-sm text-gray-600">
-      &copy; 2025 Platform Pembelajaran Informatika — Gunakan <code>Deploy as Web App</code> dan masukkan URL ke variabel <code>WEB_APP_URL</code>.
-    </footer>
+    <hr class="my-4">
+
+    <!-- Form Absensi -->
+    <h3 class="text-lg font-semibold mb-2 text-blue-600">Form Absensi Kehadiran</h3>
+    <form id="attendanceForm" class="space-y-3">
+      <div>
+        <label class="block font-semibold">Topik / Materi Hari Ini</label>
+        <input type="text" id="attendanceTopic" class="w-full p-2 border rounded" required>
+      </div>
+      <div>
+        <label class="block font-semibold">Catatan</label>
+        <textarea id="attendanceNotes" class="w-full p-2 border rounded" rows="2"></textarea>
+      </div>
+      <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded font-semibold">Kirim Absensi</button>
+    </form>
+
+    <button id="logoutBtn" class="mt-6 w-full bg-red-600 text-white py-2 rounded font-semibold">Logout</button>
   </div>
 
   <script>
-    // ================= CONFIG =================
-    const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxY1uK8ndzSPkRFIgphPZc_zgLyRUtM2aQ7XfWz0NKu6kxaWkyX7IhxLJ3J5hZzj9OW/exec"; // Ganti dengan URL Web App kamu
+    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyhFp0vWLTX_0fPdqu9JKzrfCaKcvo2iyHAJAJmGe1pAqawXorGXzjnzpDGVpqArfgV/exec";
 
-    async function api(action, params = {}, method = 'GET') {
-      params = Object.assign({ action }, params);
-      const url = method === 'GET'
-        ? WEB_APP_URL + '?' + new URLSearchParams(params).toString()
-        : WEB_APP_URL;
-
-      const options = method === 'POST'
-        ? { method, headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(params).toString() }
-        : { method };
-
-      const res = await fetch(url, options);
-      return res.json();
-    }
-
-    // ========== LOGIN ==========
     const loginForm = document.getElementById('loginForm');
-    const loginMessage = document.getElementById('loginMessage');
-    const dashboardSection = document.getElementById('dashboardSection');
-    const loginSection = document.getElementById('loginSection');
-    const logoutBtn = document.getElementById('logoutBtn');
+    const loginPage = document.getElementById('loginPage');
+    const dashboardPage = document.getElementById('dashboardPage');
+    const loginError = document.getElementById('loginError');
+
+    let currentUser = null;
 
     loginForm.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const data = Object.fromEntries(new FormData(e.target).entries());
-      const res = await api('login', data, 'GET');
-      if (res.success) {
-        loginMessage.textContent = `Login berhasil! Selamat datang, ${res.user.Nama}`;
-        loginMessage.className = "text-green-600 text-center mt-3";
-        localStorage.setItem('user', JSON.stringify(res.user));
-        localStorage.setItem('role', data.role);
-        loginSection.classList.add('hidden');
-        dashboardSection.classList.remove('hidden');
-      } else {
-        loginMessage.textContent = res.error || 'Login gagal.';
-        loginMessage.className = "text-red-600 text-center mt-3";
-      }
-    });
+      const role = document.getElementById('role').value;
+      const email = document.getElementById('email').value.trim().toLowerCase();
+      const id = document.getElementById('identifier').value.trim();
 
-    logoutBtn.addEventListener('click', () => {
-      localStorage.clear();
-      loginSection.classList.remove('hidden');
-      dashboardSection.classList.add('hidden');
-    });
+      try {
+        const sheetName = role === 'guru' ? 'DataGuru' : 'DataSiswa';
+        const response = await fetch(SCRIPT_URL, {
+          method: 'POST',
+          body: JSON.stringify({ action: 'getRecords', sheetName }),
+          headers: { 'Content-Type': 'application/json' }
+        });
+        const result = await response.json();
 
-    // Auto login jika tersimpan
-    window.addEventListener('DOMContentLoaded', () => {
-      const user = localStorage.getItem('user');
-      if (user) {
-        loginSection.classList.add('hidden');
-        dashboardSection.classList.remove('hidden');
-      }
-    });
+        if (!result.success || !result.data.records) throw new Error("Gagal mengambil data");
 
-    // ========== LOAD STUDENTS ==========
-    document.getElementById('btnLoadStudents').addEventListener('click', loadStudents);
-    const studentsContainer = document.getElementById('studentsContainer');
+        const records = result.data.records;
+        const user = records.find(r =>
+          (role === 'guru' ? r['NIP'] : r['NISN']) === id && r['Email'].toLowerCase() === email
+        );
 
-    async function loadStudents() {
-      studentsContainer.innerHTML = '<p class="text-gray-500 p-2">Memuat data...</p>';
-      const filterKelas = document.getElementById('filterKelas').value.trim();
-      const res = await api('getStudents', {}, 'GET');
-      if (res.error) {
-        studentsContainer.innerHTML = `<p class="text-red-600">${res.error}</p>`;
-        return;
-      }
-
-      let students = res.students || [];
-      if (filterKelas) students = students.filter(s => (s.Kelas || '').toLowerCase().includes(filterKelas.toLowerCase()));
-      if (!students.length) {
-        studentsContainer.innerHTML = '<p class="text-gray-500 p-2">Tidak ada data siswa.</p>';
-        return;
-      }
-
-      let html = '<table class="w-full text-sm"><thead><tr class="bg-gray-200 text-left"><th class="p-2">#</th><th class="p-2">NISN</th><th class="p-2">Nama</th><th class="p-2">Kelas</th></tr></thead><tbody>';
-      students.forEach((s, i) => {
-        html += `<tr class="${i%2?'bg-gray-50':''}"><td class="p-2">${i+1}</td><td class="p-2">${s.NISN}</td><td class="p-2">${s.Nama}</td><td class="p-2">${s.Kelas}</td></tr>`;
-      });
-      html += '</tbody></table>';
-      studentsContainer.innerHTML = html;
-    }
-
-    // ========== FORM HANDLERS ==========
-    async function handleForm(formId, actionName, successMsg) {
-      const form = document.getElementById(formId);
-      form.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const data = Object.fromEntries(new FormData(e.target).entries());
-        const res = await api(actionName, data, 'POST');
-        if (res.success) {
-          alert(successMsg);
-          form.reset();
+        if (user) {
+          currentUser = { ...user, role };
+          showDashboard(user);
         } else {
-          alert('Error: ' + (res.error || JSON.stringify(res)));
+          loginError.classList.remove('hidden');
         }
-      });
+
+      } catch (err) {
+        console.error('Login error:', err);
+        loginError.classList.remove('hidden');
+      }
+    });
+
+    function showDashboard(user) {
+      loginPage.classList.add('hidden');
+      dashboardPage.classList.remove('hidden');
+      document.getElementById('userName').textContent = user['Nama'];
+      document.getElementById('userClass').textContent = user['Kelas'] || '-';
+      document.getElementById('userEmail').textContent = user['Email'];
+      document.getElementById('userRole').textContent = user.role;
+      document.getElementById('progressNISN').value = user['NISN'] || user['NIP'];
+      document.getElementById('progressKelas').value = user['Kelas'] || '-';
     }
 
-    handleForm('formUpdateProgress', 'updateProgress', 'Progress berhasil disimpan.');
-    handleForm('formSubmitQuiz', 'submitQuiz', 'Hasil kuis berhasil disimpan.');
-    handleForm('formSubmitAssignment', 'submitAssignment', 'Tugas berhasil dikirim.');
-    handleForm('formAttendance', 'recordAttendance', 'Absensi berhasil disimpan.');
+    // Simpan Progress
+    document.getElementById('progressForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const data = {
+        action: 'addRecord',
+        sheetName: 'ProgressSiswa',
+        data: {
+          NISN: document.getElementById('progressNISN').value,
+          Nama: currentUser['Nama'],
+          Kelas: document.getElementById('progressKelas').value,
+          'Mata Pelajaran': currentUser['Mata Pelajaran'] || '-',
+          'Materi/LKPD': document.getElementById('materialName').value,
+          Jenis: document.getElementById('materialType').value,
+          Waktu: new Date().toISOString()
+        }
+      };
+      await fetch(SCRIPT_URL, {
+        method: 'POST',
+        body: JSON.stringify(data),
+        headers: { 'Content-Type': 'application/json' }
+      });
+      alert('Progress berhasil disimpan!');
+      e.target.reset();
+    });
+
+    // Simpan Absensi
+    document.getElementById('attendanceForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const data = {
+        action: 'addRecord',
+        sheetName: 'RekapProgres',
+        data: {
+          Tanggal: new Date().toLocaleDateString('id-ID'),
+          NISN: currentUser['NISN'] || currentUser['NIP'],
+          Nama: currentUser['Nama'],
+          Kelas: currentUser['Kelas'] || '-',
+          LKPD: document.getElementById('attendanceTopic').value
+        }
+      };
+      await fetch(SCRIPT_URL, {
+        method: 'POST',
+        body: JSON.stringify(data),
+        headers: { 'Content-Type': 'application/json' }
+      });
+      alert('Absensi berhasil dikirim!');
+      e.target.reset();
+    });
+
+    document.getElementById('logoutBtn').addEventListener('click', () => {
+      currentUser = null;
+      dashboardPage.classList.add('hidden');
+      loginPage.classList.remove('hidden');
+      loginForm.reset();
+    });
   </script>
 </body>
 </html>
